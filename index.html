@@ -65,7 +65,7 @@
     <circle cx="34" cy="27" r="4" fill="#CFE3D2"/>
   </svg>
   <h1>MES Sản xuất Cáp</h1>
-  <p>Đang khởi động...</p>
+  <p id="splash-msg">Đang biên dịch ứng dụng (~2-3s)...</p>
 </div>
 
 <!-- PWA Install Banner -->
@@ -83,16 +83,121 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js"></script>
 
 <script type="text/babel" data-presets="react">
 // ================================================================
-// SHIM: expose lucide-react icons the same way the JSX imports them
+// INLINE SVG ICONS — no external dependency
 // ================================================================
-const {
-  Plus, X, Package, FileText, ChevronRight, AlertCircle, CheckCircle2, Clock,
-  Trash2, Edit3, ChevronDown, ChevronUp, Copy, Layers, ClipboardList, BarChart3, ArrowRight
-} = window.LucideReact || {};
+// ================================================================
+// INLINE SVG ICONS — replaces lucide-react dependency entirely
+// Each component accepts: size (number), color (string), style (object)
+// ================================================================
+const iconBase = (paths) => ({ size = 24, color = "currentColor", style = {} } = {}) =>
+  React.createElement("svg", {
+    width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+    stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round",
+    style: { display: "inline-block", verticalAlign: "middle", flexShrink: 0, ...style }
+  }, ...paths.map((d, i) => React.createElement("path", { key: i, d })));
+
+const iconCircle = (cx, cy, r, ...paths) => ({ size = 24, color = "currentColor", style = {} } = {}) =>
+  React.createElement("svg", {
+    width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+    stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round",
+    style: { display: "inline-block", verticalAlign: "middle", flexShrink: 0, ...style }
+  }, React.createElement("circle", { cx, cy, r }), ...paths.map((d, i) => React.createElement("path", { key: i, d })));
+
+const Plus = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("line",{x1:12,y1:5,x2:12,y2:19}), React.createElement("line",{x1:5,y1:12,x2:19,y2:12}));
+
+const X = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("line",{x1:18,y1:6,x2:6,y2:18}), React.createElement("line",{x1:6,y1:6,x2:18,y2:18}));
+
+const Package = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"}),
+    React.createElement("polyline",{points:"3.27 6.96 12 12.01 20.73 6.96"}),
+    React.createElement("line",{x1:12,y1:22.08,x2:12,y2:12}));
+
+const FileText = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"}),
+    React.createElement("polyline",{points:"14 2 14 8 20 8"}),
+    React.createElement("line",{x1:16,y1:13,x2:8,y2:13}),
+    React.createElement("line",{x1:16,y1:17,x2:8,y2:17}),
+    React.createElement("polyline",{points:"10 9 9 9 8 9"}));
+
+const ChevronRight = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("polyline",{points:"9 18 15 12 9 6"}));
+
+const ChevronDown = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("polyline",{points:"6 9 12 15 18 9"}));
+
+const ChevronUp = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("polyline",{points:"18 15 12 9 6 15"}));
+
+const AlertCircle = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("circle",{cx:12,cy:12,r:10}),
+    React.createElement("line",{x1:12,y1:8,x2:12,y2:12}),
+    React.createElement("line",{x1:12,y1:16,x2:"12.01",y2:16}));
+
+const CheckCircle2 = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"}),
+    React.createElement("path",{d:"m9 12 2 2 4-4"}));
+
+const Clock = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("circle",{cx:12,cy:12,r:10}),
+    React.createElement("polyline",{points:"12 6 12 12 16 14"}));
+
+const Trash2 = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("polyline",{points:"3 6 5 6 21 6"}),
+    React.createElement("path",{d:"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"}),
+    React.createElement("line",{x1:10,y1:11,x2:10,y2:17}),
+    React.createElement("line",{x1:14,y1:11,x2:14,y2:17}));
+
+const Edit3 = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M12 20h9"}),
+    React.createElement("path",{d:"M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"}));
+
+const Copy = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("rect",{x:9,y:9,width:13,height:13,rx:2,ry:2}),
+    React.createElement("path",{d:"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"}));
+
+const Layers = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("polygon",{points:"12 2 2 7 12 12 22 7 12 2"}),
+    React.createElement("polyline",{points:"2 17 12 22 22 17"}),
+    React.createElement("polyline",{points:"2 12 12 17 22 12"}));
+
+const ClipboardList = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}),
+    React.createElement("rect",{x:8,y:2,width:8,height:4,rx:1,ry:1}),
+    React.createElement("line",{x1:9,y1:12,x2:15,y2:12}),
+    React.createElement("line",{x1:9,y1:16,x2:15,y2:16}),
+    React.createElement("line",{x1:9,y1:8,x2:9,y2:8}));
+
+const BarChart3 = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("path",{d:"M18 20V10"}),
+    React.createElement("path",{d:"M12 20V4"}),
+    React.createElement("path",{d:"M6 20v-6"}));
+
+const ArrowRight = ({ size=24, color="currentColor", style={} } = {}) =>
+  React.createElement("svg", { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{display:"inline-block",verticalAlign:"middle",flexShrink:0,...style} },
+    React.createElement("line",{x1:5,y1:12,x2:19,y2:12}),
+    React.createElement("polyline",{points:"12 5 19 12 12 19"}));
+
 
 // Destructure React hooks
 const { useState, useEffect, useMemo } = React;
@@ -4078,20 +4183,53 @@ const styles = {
 
 
 // ================================================================
+// ERROR BOUNDARY
+// ================================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      // Hide splash on error too
+      const splash = document.getElementById("splash");
+      if (splash) splash.remove();
+      return React.createElement("div", {
+        style: { padding: 32, fontFamily: "sans-serif", maxWidth: 600, margin: "40px auto" }
+      },
+        React.createElement("h2", { style: { color: "#B23A3A" } }, "⚠️ Lỗi khởi động"),
+        React.createElement("pre", {
+          style: { background: "#f8e9e9", padding: 16, borderRadius: 8, fontSize: 12, overflow: "auto", whiteSpace: "pre-wrap" }
+        }, String(this.state.error)),
+        React.createElement("button", {
+          onClick: () => window.location.reload(),
+          style: { marginTop: 16, padding: "10px 20px", background: "#0B3D2E", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }
+        }, "Tải lại trang")
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ================================================================
 // MOUNT
 // ================================================================
 const container = document.getElementById("root");
 const reactRoot = ReactDOM.createRoot(container);
-reactRoot.render(React.createElement(MESApp));
+reactRoot.render(
+  React.createElement(ErrorBoundary, null, React.createElement(MESApp))
+);
 
-// Hide splash after mount
-setTimeout(() => {
+// Hide splash after mount — Babel transpile can take 1-3s for large file
+function hideSplash() {
   const splash = document.getElementById("splash");
   if (splash) {
     splash.classList.add("hide");
-    setTimeout(() => splash.remove(), 450);
+    setTimeout(() => { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 450);
   }
-}, 600);
+}
+// Try after 800ms, retry after 2s if still showing
+setTimeout(hideSplash, 800);
+setTimeout(hideSplash, 2500);
 </script>
 
 <script>
