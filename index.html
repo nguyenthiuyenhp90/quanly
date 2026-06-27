@@ -1,0 +1,4146 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0B3D2E" />
+  <meta name="description" content="Hệ thống quản lý sản xuất dây cáp: PO, BOM, Lệnh SX, Giao dịch, Dashboard" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MES App" />
+  <title>MES — Quản lý Sản xuất</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+
+  <!-- Preconnect for speed -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #F7F8F6; }
+    #root { min-height: 100vh; }
+
+    /* Splash screen */
+    #splash {
+      position: fixed; inset: 0; background: #0B3D2E;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      z-index: 9999; transition: opacity 0.4s ease;
+    }
+    #splash.hide { opacity: 0; pointer-events: none; }
+    #splash svg { width: 56px; height: 56px; }
+    #splash h1 {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #fff; font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -0.3px;
+    }
+    #splash p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; font-family: sans-serif; }
+
+    /* PWA install prompt */
+    #pwa-banner {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: #0B3D2E; color: #fff; border-radius: 12px;
+      padding: 12px 20px; font-family: sans-serif; font-size: 13px;
+      display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 1000; max-width: 380px; width: calc(100% - 32px); display: none;
+    }
+    #pwa-banner button {
+      background: #fff; color: #0B3D2E; border: none; border-radius: 8px;
+      padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    #pwa-banner-close {
+      background: transparent !important; color: rgba(255,255,255,0.6) !important;
+      padding: 4px 8px !important; font-size: 18px !important;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Splash -->
+<div id="splash">
+  <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="56" height="56" rx="14" fill="#1a5c3e"/>
+    <path d="M12 40 L12 20 L22 14 L34 20 L44 16 L44 36 L34 42 L22 36 Z" stroke="#7AC893" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+    <circle cx="22" cy="27" r="4" fill="#7AC893"/>
+    <circle cx="34" cy="27" r="4" fill="#CFE3D2"/>
+  </svg>
+  <h1>MES Sản xuất Cáp</h1>
+  <p>Đang khởi động...</p>
+</div>
+
+<!-- PWA Install Banner -->
+<div id="pwa-banner">
+  <span>📲 Cài đặt app để dùng offline</span>
+  <button id="pwa-install-btn">Cài đặt</button>
+  <button id="pwa-banner-close" class="pwa-banner-close">✕</button>
+</div>
+
+<!-- React root -->
+<div id="root"></div>
+
+<!-- Dependencies via CDN (UMD builds, no bundler needed) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+// ================================================================
+// SHIM: expose lucide-react icons the same way the JSX imports them
+// ================================================================
+const {
+  Plus, X, Package, FileText, ChevronRight, AlertCircle, CheckCircle2, Clock,
+  Trash2, Edit3, ChevronDown, ChevronUp, Copy, Layers, ClipboardList, BarChart3, ArrowRight
+} = window.LucideReact || {};
+
+// Destructure React hooks
+const { useState, useEffect, useMemo } = React;
+
+// XLSX is already global via CDN script
+
+// ================================================================
+// APP CORE — pasted from mes-app.jsx with storage patched to localStorage
+// ================================================================
+
+// ====================================================================
+// DANH MỤC CỐ ĐỊNH DÙNG CHUNG TOÀN APP
+// ====================================================================
+const CONG_DOAN_LIST = [
+  { id: "loi", ten: "Lõi", nhanGoiBienThe: "màu", goiYBienThe: ["GR", "BL", "OR", "BR", "Kẻ xanh lá", "Kẻ xanh dương", "Kẻ cam", "Kẻ nâu"], coHeSoMet: true },
+  { id: "xoan_doi", ten: "Xoắn đôi", nhanGoiBienThe: "cặp màu", goiYBienThe: ["GRWH", "BLWH", "ORWH", "BRWH"], coHeSoMet: true },
+  { id: "vach", ten: "Vách", nhanGoiBienThe: "tên BTP", goiYBienThe: [], coHeSoMet: false },
+  { id: "xoan_tong", ten: "Xoắn tổng", nhanGoiBienThe: "tên BTP", goiYBienThe: [], coHeSoMet: false },
+  { id: "det", ten: "Dệt", nhanGoiBienThe: "tên BTP", goiYBienThe: [], coHeSoMet: false },
+  { id: "boc", ten: "Bọc", nhanGoiBienThe: "tên BTP", goiYBienThe: [], coHeSoMet: false },
+  { id: "cat_dong_goi", ten: "Cắt đóng gói", nhanGoiBienThe: "tên BTP/quy cách", goiYBienThe: [], coHeSoMet: false },
+];
+
+function tenCongDoan(id) {
+  return CONG_DOAN_LIST.find((c) => c.id === id)?.ten || id;
+}
+
+// Tạo mã LSX tăng dần theo từng công đoạn (LSX-LOI-001, LSX-LOI-002...) thay vì
+// số ngẫu nhiên từ timestamp - dễ đọc, dễ nói miệng, dễ tra cứu hơn. Đếm số LSX
+// hiện có cùng công đoạn, lấy số lớn nhất + 1, định dạng 3 chữ số.
+function taoMaLSXTangDan(congDoanId, lsxList) {
+  const tienTo = `LSX-${tenCongDoan(congDoanId).toUpperCase().replace(/\s/g, "")}-`;
+  let soLonNhat = 0;
+  (lsxList || []).forEach((l) => {
+    if (l.ma && l.ma.startsWith(tienTo)) {
+      const phanSo = l.ma.slice(tienTo.length);
+      const so = parseInt(phanSo, 10);
+      if (!isNaN(so) && so > soLonNhat) soLonNhat = so;
+    }
+  });
+  const soMoi = soLonNhat + 1;
+  return `${tienTo}${String(soMoi).padStart(3, "0")}`;
+}
+
+// Nhóm NVL thô cố định — dùng để lọc/tổng hợp đúng theo nhóm trên card PO,
+// tách biệt với "tên NVL" (vốn là tên cụ thể tự do, ví dụ "Đồng 7/0.195BC")
+const NHOM_NVL_LIST = ["Đồng", "Nhựa", "Giấy bạc", "Chỉ", "Khác"];
+
+// ====================================================================
+// STORAGE KEYS DÙNG CHUNG
+// ====================================================================
+const SK_PO = "mes-po-v1";
+const SK_BOM = "mes-bom-v1";
+const SK_LSX = "mes-lsx-v1";
+const SK_GD = "mes-giaodich-v1";
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+// Ngày giờ đầy đủ lúc tạo - tự ghi nhận, không cho sửa tay, dùng cho PO và LSX
+function nowISO() {
+  return new Date().toISOString();
+}
+// Định dạng ngày giờ để hiển thị thân thiện trên card (vd: 24/06/2026 14:35)
+function formatNgayGio(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+function formatNumber(n, digits = 1) {
+  if (n === "" || n === null || n === undefined || isNaN(n)) return "0";
+  const num = Number(n);
+  const isNegative = num < 0;
+  const fixed = Math.abs(num).toFixed(digits);
+  const [phanNguyen, phanLe] = fixed.split(".");
+  // Tự chèn dấu chấm phân nhóm nghìn vào phần nguyên, không phụ thuộc
+  // vào toLocaleString của trình duyệt (môi trường artifact có thể không
+  // hỗ trợ đầy đủ locale "vi-VN" nên số ra không có dấu chấm phân nghìn)
+  const phanNguyenCoChiam = phanNguyen.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const ketQua = phanLe ? `${phanNguyenCoChiam},${phanLe}` : phanNguyenCoChiam;
+  return isNegative ? `-${ketQua}` : ketQua;
+}
+function sumNVL(nvlList) {
+  if (!nvlList || nvlList.length === 0) return 0;
+  return nvlList.reduce((acc, n) => acc + (Number(n.dinhMuc) || 0), 0);
+}
+
+// ====================================================================
+// GENERIC STORAGE HELPERS
+// ====================================================================
+async function loadData(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+async function saveData(key, list) {
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch (e) {
+    console.error("Lỗi lưu dữ liệu:", key, e);
+  }
+}
+
+// Tổng hợp toàn bộ NVL của 1 BOM, gộp theo ĐÚNG TÊN NVL
+function tongHopNvlToanBOM(bom) {
+  const map = {};
+  const add = (ten, dinhMuc) => {
+    if (!ten) return;
+    map[ten] = (map[ten] || 0) + (Number(dinhMuc) || 0);
+  };
+  Object.values(bom.dinhMuc || {}).forEach((bienTheList) => {
+    (bienTheList || []).forEach((bt) => {
+      (bt.nvlList || []).forEach((n) => add(n.ten, n.dinhMuc));
+    });
+  });
+  return Object.entries(map)
+    .map(([ten, tong]) => ({ ten, tong }))
+    .sort((a, b) => b.tong - a.tong);
+}
+
+// ====================================================================
+// ENGINE CASCADE: từ Mét TP, tính ngược ra mét mỗi công đoạn (theo Hệ số
+// mét K đã khai trong BOM) rồi tính kg NVL mỗi loại (mét công đoạn ×
+// định mức NVL của đúng biến thể đó). Không cộng dồn nhiều lần - mỗi
+// biến thể tính kg riêng theo mét đã cascade của chính nó.
+// ====================================================================
+function tinhCascadeBOM(bom, metTP) {
+  const met = Number(metTP) || 0;
+  const ketQua = []; // [{ congDoanId, congDoanTen, tenBienThe, heSoMet, metCongDoan, nvlList: [{ten, nhomNVL, dinhMuc, kg}] }]
+  const tongNvl = {}; // gộp theo tên NVL bất kể từ đâu
+  const tongTheoNhom = {}; // gộp theo Nhóm NVL (Đồng/Nhựa/Giấy bạc/Chỉ/Khác) - dùng cho card PO
+
+  CONG_DOAN_LIST.forEach((cd) => {
+    const bienTheList = bom.dinhMuc?.[cd.id];
+    if (!bienTheList || bienTheList.length === 0) return;
+    bienTheList.forEach((bt) => {
+      const heSo = cd.coHeSoMet ? Number(bt.heSoMet) || 1 : 1;
+      const metCongDoan = met * heSo;
+      const nvlList = (bt.nvlList || []).map((n) => {
+        const kg = metCongDoan * (Number(n.dinhMuc) || 0);
+        tongNvl[n.ten] = (tongNvl[n.ten] || 0) + kg;
+        const nhom = n.nhomNVL || "Khác";
+        tongTheoNhom[nhom] = (tongTheoNhom[nhom] || 0) + kg;
+        return { ten: n.ten, nhomNVL: nhom, dinhMuc: n.dinhMuc, kg };
+      });
+      ketQua.push({
+        congDoanId: cd.id,
+        congDoanTen: cd.ten,
+        tenBienThe: bt.tenBienThe,
+        heSoMet: heSo,
+        metCongDoan,
+        nvlList,
+      });
+    });
+  });
+
+  const tongNvlArr = Object.entries(tongNvl)
+    .map(([ten, kg]) => ({ ten, kg }))
+    .sort((a, b) => b.kg - a.kg);
+  const tongTheoNhomArr = Object.entries(tongTheoNhom)
+    .map(([nhom, kg]) => ({ nhom, kg }))
+    .sort((a, b) => b.kg - a.kg);
+  const tongKg = tongNvlArr.reduce((acc, x) => acc + x.kg, 0);
+
+  return { chiTiet: ketQua, tongTheoNvl: tongNvlArr, tongTheoNhom: tongTheoNhomArr, tongKg };
+}
+
+// ====================================================================
+// MAIN APP - NAVIGATION SHELL
+// ====================================================================
+function MESApp() {
+  const [tab, setTab] = useState("po");
+  const [poList, setPoList] = useState([]);
+  const [bomList, setBomList] = useState([]);
+  const [lsxList, setLsxList] = useState([]);
+  const [gdList, setGdList] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [po, bom, lsx, gd] = await Promise.all([
+        loadData(SK_PO),
+        loadData(SK_BOM),
+        loadData(SK_LSX),
+        loadData(SK_GD),
+      ]);
+      setPoList(po);
+      setBomList(bom);
+      setLsxList(lsx);
+      setGdList(gd);
+      setLoading(false);
+    })();
+  }, []);
+
+  const persistPO = async (list) => {
+    setPoList(list);
+    await saveData(SK_PO, list);
+  };
+  const persistBOM = async (list) => {
+    setBomList(list);
+    await saveData(SK_BOM, list);
+  };
+  const persistLSX = async (list) => {
+    setLsxList(list);
+    await saveData(SK_LSX, list);
+  };
+  const persistGD = async (list) => {
+    setGdList(list);
+    await saveData(SK_GD, list);
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.loadingWrap}>
+        <div style={styles.loadingText}>Đang tải dữ liệu...</div>
+      </div>
+    );
+  }
+
+  const TABS = [
+    { id: "po", label: "PO", icon: Package },
+    { id: "bom", label: "BOM", icon: FileText },
+    { id: "lsx", label: "Lệnh SX", icon: Layers },
+    { id: "gd", label: "Giao dịch", icon: ClipboardList },
+    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
+  ];
+
+  return (
+    <div style={styles.app}>
+      <style>{globalCSS}</style>
+
+      <div style={styles.tabBar}>
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{ ...styles.tabBtn, ...(active ? styles.tabBtnActive : {}) }}
+            >
+              <Icon size={16} />
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={styles.tabContent}>
+        {tab === "po" && (
+          <ModulePO
+            poList={poList}
+            persistPO={persistPO}
+            bomList={bomList}
+          />
+        )}
+        {tab === "bom" && <ModuleBOM bomList={bomList} persistBOM={persistBOM} />}
+        {tab === "lsx" && (
+          <ModuleLSX poList={poList} bomList={bomList} lsxList={lsxList} persistLSX={persistLSX} gdList={gdList} />
+        )}
+        {tab === "gd" && (
+          <ModuleGiaoDich
+            gdList={gdList}
+            persistGD={persistGD}
+            poList={poList}
+            bomList={bomList}
+            lsxList={lsxList}
+          />
+        )}
+        {tab === "dashboard" && (
+          <ModuleDashboard poList={poList} bomList={bomList} lsxList={lsxList} gdList={gdList} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// MODULE LỆNH SẢN XUẤT (LSX)
+// ====================================================================
+// Cấu trúc 1 LSX:
+// {
+//   id, ma, congDoanId, bomId, quyCach, ngayTao, trangThai,
+//   poItems: [{ poId }],              // các PO được gộp vào lệnh này
+//   bienTheData: {                    // ma trận PO x màu = số mét
+//     [tenBienThe]: { [poId]: soMet }
+//   }
+// }
+
+function tinhTongHopLSX(lsx, bom) {
+  // Tổng mét theo từng biến thể (cộng tất cả PO)
+  const tongMetTheoBienThe = {};
+  const tongKgTheoBienThe = {};
+  let tongMetCaLenh = 0;
+  Object.entries(lsx.bienTheData || {}).forEach(([tenBienThe, poMap]) => {
+    let tongMet = 0;
+    let tongKg = 0;
+    Object.values(poMap).forEach((o) => {
+      tongMet += Number(o?.met) || 0;
+      tongKg += Number(o?.kg) || 0;
+    });
+    tongMetTheoBienThe[tenBienThe] = tongMet;
+    tongKgTheoBienThe[tenBienThe] = tongKg;
+    tongMetCaLenh += tongMet;
+  });
+
+  // Tổng NVL dự kiến: nếu đã có mét cho biến thể, tính theo mét x định mức BOM (chính xác nhất
+  // vì biết rõ từng loại NVL). Nếu chỉ có kg tổng (Cắt đóng gói theo Pcs, không quy đổi được),
+  // không tách được từng loại NVL nên bỏ qua phần này.
+  const tongNvl = {};
+  if (bom) {
+    const bienTheListBOM = bom.dinhMuc?.[lsx.congDoanId] || [];
+    bienTheListBOM.forEach((btBOM) => {
+      const metCuaBienThe = tongMetTheoBienThe[btBOM.tenBienThe] || 0;
+      (btBOM.nvlList || []).forEach((n) => {
+        const v = metCuaBienThe * (Number(n.dinhMuc) || 0);
+        tongNvl[n.ten] = (tongNvl[n.ten] || 0) + v;
+      });
+    });
+  }
+
+  return { tongMetTheoBienThe, tongKgTheoBienThe, tongMetCaLenh, tongNvl };
+}
+
+function ModuleLSX({ poList, bomList, lsxList, persistLSX, gdList }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingLSX, setEditingLSX] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [filterCongDoan, setFilterCongDoan] = useState("all");
+
+  const handleSave = async (lsx) => {
+    let newList;
+    const exists = lsxList.find((l) => l.id === lsx.id);
+    if (exists) {
+      newList = lsxList.map((l) => (l.id === lsx.id ? lsx : l));
+    } else {
+      newList = [...lsxList, lsx];
+    }
+    await persistLSX(newList);
+    setShowForm(false);
+    setEditingLSX(null);
+  };
+
+  const handleDelete = async (id) => {
+    await persistLSX(lsxList.filter((l) => l.id !== id));
+    setConfirmDelete(null);
+  };
+
+  const handleToggleStatus = async (id) => {
+    const newList = lsxList.map((l) =>
+      l.id === id ? { ...l, trangThai: l.trangThai === "dang_chay" ? "hoan_tat" : "dang_chay" } : l
+    );
+    await persistLSX(newList);
+  };
+
+  const filteredList = useMemo(() => {
+    if (filterCongDoan === "all") return lsxList;
+    return lsxList.filter((l) => l.congDoanId === filterCongDoan);
+  }, [lsxList, filterCongDoan]);
+
+  return (
+    <div>
+      <div style={styles.moduleHeader}>
+        <div>
+          <h2 style={styles.moduleTitle}>Lệnh sản xuất</h2>
+          <p style={styles.moduleSub}>Gộp nhiều PO cùng quy cách vào 1 lệnh chạy chung</p>
+        </div>
+        <button
+          style={styles.btnPrimary}
+          onClick={() => {
+            setEditingLSX(null);
+            setShowForm(true);
+          }}
+          disabled={bomList.length === 0 || poList.length === 0}
+        >
+          <Plus size={18} />
+          <span>Tạo Lệnh SX</span>
+        </button>
+      </div>
+
+      {(bomList.length === 0 || poList.length === 0) && (
+        <div style={styles.warnBox}>
+          <AlertCircle size={15} />
+          <span>Cần có ít nhất 1 BOM và 1 PO trước khi tạo Lệnh sản xuất.</span>
+        </div>
+      )}
+
+      <div style={styles.filterRow}>
+        <button
+          onClick={() => setFilterCongDoan("all")}
+          style={{ ...styles.filterTab, ...(filterCongDoan === "all" ? styles.filterTabActive : {}) }}
+        >
+          Tất cả
+        </button>
+        {CONG_DOAN_LIST.map((cd) => (
+          <button
+            key={cd.id}
+            onClick={() => setFilterCongDoan(cd.id)}
+            style={{ ...styles.filterTab, ...(filterCongDoan === cd.id ? styles.filterTabActive : {}) }}
+          >
+            {cd.ten}
+          </button>
+        ))}
+      </div>
+
+      {filteredList.length === 0 ? (
+        <div style={styles.emptyState}>
+          <Layers size={40} color="#A9AFA6" />
+          <p style={styles.emptyTitle}>Chưa có Lệnh sản xuất nào</p>
+          <p style={styles.emptySub}>Gộp các PO cùng quy cách vào 1 lệnh để chạy chung</p>
+        </div>
+      ) : (
+        <div style={styles.lsxList}>
+          {filteredList
+            .slice()
+            .reverse()
+            .map((lsx) => {
+              const bom = bomList.find((b) => b.id === lsx.bomId);
+              return (
+                <LSXCard
+                  key={lsx.id}
+                  lsx={lsx}
+                  bom={bom}
+                  poList={poList}
+                  gdList={gdList}
+                  onEdit={() => {
+                    setEditingLSX(lsx);
+                    setShowForm(true);
+                  }}
+                  onDelete={() => setConfirmDelete(lsx.id)}
+                  onToggleStatus={() => handleToggleStatus(lsx.id)}
+                />
+              );
+            })}
+        </div>
+      )}
+
+      {showForm && (
+        <LSXFormModal
+          initial={editingLSX}
+          poList={poList}
+          bomList={bomList}
+          lsxList={lsxList}
+          congDoanCoDinh={!editingLSX && filterCongDoan !== "all" ? filterCongDoan : null}
+          onClose={() => {
+            setShowForm(false);
+            setEditingLSX(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          message="Xóa Lệnh sản xuất này? Liên kết với các PO sẽ mất, hành động không thể hoàn tác."
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => handleDelete(confirmDelete)}
+        />
+      )}
+    </div>
+  );
+}
+
+function LSXCard({ lsx, bom, poList, gdList, onEdit, onDelete, onToggleStatus }) {
+  const [expanded, setExpanded] = useState(false);
+  const isDangChay = lsx.trangThai === "dang_chay";
+  const { tongMetTheoBienThe, tongKgTheoBienThe, tongMetCaLenh, tongNvl } = useMemo(
+    () => tinhTongHopLSX(lsx, bom),
+    [lsx, bom]
+  );
+  const poNames = (lsx.poItems || [])
+    .map((item) => poList.find((p) => p.id === item.poId)?.maPO)
+    .filter(Boolean);
+
+  // Tồn kho theo từng màu = Đã sản xuất ra (theo ma trận PO×màu của lệnh này)
+  // − Đã bị Xuất BTP đi cho công đoạn khác (Giao dịch OUT_BTP có congDoanNguon = công
+  // đoạn của lệnh này, gắn đúng LSX này). Đây là số còn lại sẵn sàng cho công đoạn
+  // sau lấy tiếp, để tránh xuất quá số đã làm ra.
+  const tonKhoTheoBienThe = useMemo(() => {
+    const result = {};
+    Object.keys(tongMetTheoBienThe || {}).forEach((tenBienThe) => {
+      const daSanXuatMet = tongMetTheoBienThe[tenBienThe] || 0;
+      const daSanXuatKg = (tongKgTheoBienThe && tongKgTheoBienThe[tenBienThe]) || 0;
+      const daXuatDi = (gdList || []).filter(
+        (g) =>
+          g.loaiGD === "OUT_BTP" &&
+          g.gomVao === "lsx" &&
+          g.lsxId === lsx.id &&
+          g.tenBienThe === tenBienThe
+      );
+      const daXuatMet = daXuatDi.reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+      const daXuatKg = daXuatDi.reduce((acc, g) => acc + (Number(g.soLuongKg) || 0), 0);
+      result[tenBienThe] = {
+        conLaiMet: daSanXuatMet - daXuatMet,
+        conLaiKg: daSanXuatKg - daXuatKg,
+        daXuatMet,
+        daXuatKg,
+      };
+    });
+    return result;
+  }, [tongMetTheoBienThe, tongKgTheoBienThe, gdList, lsx.id]);
+
+  // BTP đầu vào đã nhận: với các công đoạn không phải Lõi (cần BTP từ công đoạn
+  // trước làm đầu vào, ví dụ Xoắn đôi cần BTP Lõi), gộp theo tên biến thể/BTP
+  // từ tất cả Giao dịch Xuất BTP có ĐÍCH = chính xác lệnh này (lsxDichId === lsx.id),
+  // không lẫn với các LSX khác cùng công đoạn chạy song song.
+  const dauVaoDaNhan = useMemo(() => {
+    const result = {};
+    (gdList || [])
+      .filter((g) => g.loaiGD === "OUT_BTP" && g.lsxDichId === lsx.id)
+      .forEach((g) => {
+        const ten = g.tenBienThe || "(không rõ)";
+        if (!result[ten]) result[ten] = { met: 0, kg: 0 };
+        result[ten].met += Number(g.soLuongMet) || 0;
+        result[ten].kg += Number(g.soLuongKg) || 0;
+      });
+    return result;
+  }, [gdList, lsx.id]);
+
+  return (
+    <div style={styles.bomCard}>
+      <button style={styles.bomCardHeader} onClick={() => setExpanded(!expanded)}>
+        <div style={styles.bomCardLeft}>
+          <div style={styles.bomCodeRow}>
+            <span style={styles.bomCode}>{lsx.ma}</span>
+            <span style={styles.quyCachTag}>{tenCongDoan(lsx.congDoanId)}</span>
+          </div>
+          <div style={styles.bomDesc}>
+            {bom?.maTP} {bom?.quyCach ? `(${bom.quyCach})` : ""} — {poNames.length} PO gộp
+          </div>
+          {lsx.ngayTao && <div style={styles.poNgayTao}>Tạo lúc: {formatNgayGio(lsx.ngayTao)}</div>}
+        </div>
+        <div style={styles.bomCardRight}>
+          <span
+            style={{
+              ...styles.statusBadge,
+              background: isDangChay ? "#FBEEE4" : "#E7F0EA",
+              color: isDangChay ? "#C8602F" : "#2F6B47",
+            }}
+          >
+            {isDangChay ? "Đang chạy" : "Hoàn tất"}
+          </span>
+          {expanded ? <ChevronUp size={18} color="#6B7068" /> : <ChevronDown size={18} color="#6B7068" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div style={styles.bomCardBody}>
+          <div style={styles.poTagsRow}>
+            {poNames.map((name) => (
+              <span key={name} style={styles.poTagChip}>
+                {name}
+              </span>
+            ))}
+          </div>
+
+          {Object.keys(dauVaoDaNhan).length > 0 && (
+            <div style={styles.dauVaoBox}>
+              <div style={styles.dauVaoTitle}>BTP đầu vào đã nhận (từ Giao dịch Xuất BTP của lệnh khác)</div>
+              <div style={styles.tongHopGrid}>
+                {Object.entries(dauVaoDaNhan).map(([ten, v]) => (
+                  <div key={ten} style={styles.dauVaoItem}>
+                    <span style={styles.dauVaoName}>{ten}</span>
+                    <span style={styles.dauVaoValue}>
+                      {v.kg > 0 ? `${formatNumber(v.kg, 1)} kg` : ""}
+                      {v.kg > 0 && v.met > 0 ? " · " : ""}
+                      {v.met > 0 ? `${formatNumber(v.met, 1)} m` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={styles.tongHopBox}>
+            <div style={styles.tongHopTitle}>Tổng mét theo {tenCongDoan(lsx.congDoanId)} ({CONG_DOAN_LIST.find(c=>c.id===lsx.congDoanId)?.nhanGoiBienThe})</div>
+            <div style={styles.tongHopGrid}>
+              {Object.entries(tongMetTheoBienThe).map(([ten, met]) => (
+                <div key={ten} style={styles.tongHopItem}>
+                  <span style={styles.tongHopName}>{ten}</span>
+                  <span style={styles.tongHopValue}>{formatNumber(met, 1)} m</span>
+                </div>
+              ))}
+              <div style={{ ...styles.tongHopItem, background: "#0B3D2E" }}>
+                <span style={{ ...styles.tongHopName, color: "#CFE3D2" }}>Tổng cả lệnh</span>
+                <span style={{ ...styles.tongHopValue, color: "#fff" }}>{formatNumber(tongMetCaLenh, 1)} m</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.tonKhoBox}>
+            <div style={styles.tonKhoTitle}>
+              Tồn kho còn lại (chưa công đoạn nào lấy đi)
+            </div>
+            <div style={styles.tongHopGrid}>
+              {Object.entries(tonKhoTheoBienThe).map(([ten, tk]) => {
+                const heet = tk.conLaiMet <= 0.01 && tk.daXuatMet > 0;
+                return (
+                  <div
+                    key={ten}
+                    style={{
+                      ...styles.tonKhoItem,
+                      ...(heet ? styles.tonKhoItemHeet : {}),
+                    }}
+                  >
+                    <span style={styles.tonKhoName}>{ten}</span>
+                    <span style={styles.tonKhoValue}>
+                      {tk.conLaiMet > 0 ? `${formatNumber(tk.conLaiMet, 1)} m` : ""}
+                      {tk.conLaiMet > 0 && tk.conLaiKg > 0 ? " · " : ""}
+                      {tk.conLaiKg > 0 ? `${formatNumber(tk.conLaiKg, 1)} kg` : ""}
+                      {tk.conLaiMet <= 0 && tk.conLaiKg <= 0 ? "Hết" : ""}
+                    </span>
+                    {tk.daXuatMet > 0 && (
+                      <span style={styles.tonKhoDaXuat}>Đã xuất: {formatNumber(tk.daXuatMet, 1)} m</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {Object.keys(tongNvl).length > 0 && (
+            <div style={styles.tongHopBox}>
+              <div style={styles.tongHopTitle}>NVL dự kiến cần xuất cho cả lệnh</div>
+              <div style={styles.tongHopGrid}>
+                {Object.entries(tongNvl).map(([ten, kg]) => (
+                  <div key={ten} style={styles.tongHopItem}>
+                    <span style={styles.tongHopName}>{ten}</span>
+                    <span style={styles.tongHopValue}>{formatNumber(kg, 1)} kg</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chi tiết theo từng PO */}
+          <div style={styles.dinhMucCongDoan}>
+            <div style={styles.dinhMucCongDoanTitle}>Chi tiết theo từng PO</div>
+            <div style={styles.mauTable}>
+              {(lsx.poItems || []).map((item) => {
+                const po = poList.find((p) => p.id === item.poId);
+                if (!po) return null;
+                let metPO = 0;
+                let kgPO = 0;
+                Object.values(lsx.bienTheData || {}).forEach((poMap) => {
+                  metPO += Number(poMap[item.poId]?.met) || 0;
+                  kgPO += Number(poMap[item.poId]?.kg) || 0;
+                });
+                const donViThu2Hien = lsx.congDoanId === "cat_dong_goi" && lsx.donViThu2 === "pcs" ? "pcs" : "m";
+                return (
+                  <div key={item.poId} style={styles.mauRow}>
+                    <span style={styles.mauRowLabel}>{po.maPO}</span>
+                    <div style={styles.mauRowNvl}>
+                      {Object.entries(lsx.bienTheData || {}).map(([ten, poMap]) => {
+                        const o = poMap[item.poId];
+                        if (!o || ((Number(o.kg) || 0) <= 0 && (Number(o.met) || 0) <= 0)) return null;
+                        return (
+                          <span key={ten} style={styles.nvlChipDisplay}>
+                            {ten}: {o.kg ? `${formatNumber(o.kg, 1)}kg` : ""}
+                            {o.kg && o.met ? " / " : ""}
+                            {o.met ? `${formatNumber(o.met, 1)}${donViThu2Hien}` : ""}
+                          </span>
+                        );
+                      })}
+                      <span style={styles.tongChip}>
+                        Tổng PO: {kgPO > 0 ? `${formatNumber(kgPO, 1)}kg` : ""}
+                        {kgPO > 0 && metPO > 0 ? " / " : ""}
+                        {metPO > 0 ? `${formatNumber(metPO, 1)}${donViThu2Hien}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={styles.bomCardFooter}>
+            <button onClick={onToggleStatus} style={styles.iconBtn}>
+              <CheckCircle2 size={15} />
+              <span>{isDangChay ? "Đánh dấu hoàn tất" : "Mở lại"}</span>
+            </button>
+            <button onClick={onEdit} style={styles.iconBtn}>
+              <Edit3 size={15} />
+              <span>Sửa</span>
+            </button>
+            <button onClick={onDelete} style={{ ...styles.iconBtn, color: "#B23A3A" }}>
+              <Trash2 size={15} />
+              <span>Xóa</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LSXFormModal({ initial, poList, bomList, lsxList, congDoanCoDinh, onClose, onSave }) {
+  const [congDoanId, setCongDoanId] = useState(initial?.congDoanId || congDoanCoDinh || "");
+  const [bomId, setBomId] = useState(initial?.bomId || "");
+  const [selectedPoIds, setSelectedPoIds] = useState((initial?.poItems || []).map((i) => i.poId));
+  // bienTheData: { [tenBienThe]: { [poId]: { kg, met } } } - mỗi ô lưu cả 2 đơn vị
+  const [bienTheData, setBienTheData] = useState(initial?.bienTheData || {});
+  // Đơn vị thứ 2 cho riêng Cắt đóng gói: "m" hoặc "pcs" - tổ trưởng tự chọn khi nhập
+  const [donViThu2, setDonViThu2] = useState(initial?.donViThu2 || "m");
+  const [error, setError] = useState("");
+
+  const bomChon = bomList.find((b) => b.id === bomId);
+
+  // PO khả dụng để chọn: phải cùng BOM (=cùng quy cách) đã chọn, và PO đó phải có BOM
+  // áp dụng công đoạn đang chọn
+  const poKhaDung = useMemo(() => {
+    if (!bomId) return [];
+    return poList.filter((po) => po.bomId === bomId);
+  }, [poList, bomId]);
+
+  // Danh sách biến thể (màu) của công đoạn này, theo đúng BOM đã chọn
+  const bienTheListBOM = useMemo(() => {
+    if (!bomChon || !congDoanId) return [];
+    return bomChon.dinhMuc?.[congDoanId] || [];
+  }, [bomChon, congDoanId]);
+
+  const isCatDongGoi = congDoanId === "cat_dong_goi";
+
+  const togglePO = (poId) => {
+    const dangChon = selectedPoIds.includes(poId);
+    if (dangChon) {
+      // Bỏ chọn PO: xóa khỏi danh sách và xóa luôn dữ liệu đã điền của PO đó trong ma trận
+      setSelectedPoIds((prev) => prev.filter((x) => x !== poId));
+      setBienTheData((prev) => {
+        const copy = {};
+        Object.entries(prev).forEach(([ten, poMap]) => {
+          const { [poId]: _bo, ...rest } = poMap;
+          copy[ten] = rest;
+        });
+        return copy;
+      });
+      return;
+    }
+
+    // Thêm PO: tự điền sẵn theo Cascade = Mục tiêu mét TP của PO × Hệ số mét của từng màu,
+    // rồi tự tính kg theo định mức BOM của đúng màu đó. Tổ trưởng vẫn sửa tay được sau.
+    setSelectedPoIds((prev) => [...prev, poId]);
+    const po = poList.find((p) => p.id === poId);
+    if (po && bienTheListBOM.length > 0 && !isCatDongGoi) {
+      setBienTheData((prev) => {
+        const copy = { ...prev };
+        bienTheListBOM.forEach((bt) => {
+          const heSo = Number(bt.heSoMet) || 1;
+          const met = (Number(po.mucTieuMet) || 0) * heSo;
+          if (met <= 0) return;
+          const dinhMuc = sumNVL(bt.nvlList) || null;
+          const kg = dinhMuc ? met * dinhMuc : null;
+          copy[bt.tenBienThe] = {
+            ...(copy[bt.tenBienThe] || {}),
+            [poId]: {
+              met: String(Math.round(met * 10) / 10),
+              kg: kg !== null ? String(Math.round(kg * 10) / 10) : "",
+            },
+          };
+        });
+        return copy;
+      });
+    }
+  };
+
+  // Định mức quy đổi (kg/m) của 1 biến thể = tổng định mức tất cả NVL trong biến thể đó.
+  // Dùng để tự tính qua lại giữa kg và mét khi tổ trưởng gõ 1 trong 2 ô.
+  // Với Cắt đóng gói đơn vị Pcs thì không quy đổi được (không có nghĩa kg/pcs cố định).
+  const layDinhMucBienThe = (tenBienThe) => {
+    const bt = bienTheListBOM.find((b) => b.tenBienThe === tenBienThe);
+    if (!bt) return null;
+    return sumNVL(bt.nvlList) || null;
+  };
+
+  const updateOCell = (tenBienThe, poId, field, value) => {
+    setBienTheData((prev) => {
+      const oCu = prev[tenBienThe]?.[poId] || {};
+      const oMoi = { ...oCu, [field]: value };
+      // Tự quy đổi qua lại nếu có định mức và không phải Cắt đóng gói/Pcs
+      const dinhMuc = layDinhMucBienThe(tenBienThe);
+      const coTheQuyDoi = dinhMuc && !(isCatDongGoi && donViThu2 === "pcs");
+      if (coTheQuyDoi && value !== "") {
+        if (field === "kg") {
+          const met = Number(value) / dinhMuc;
+          oMoi.met = isFinite(met) ? String(Math.round(met * 10) / 10) : oCu.met || "";
+        } else if (field === "met") {
+          const kg = Number(value) * dinhMuc;
+          oMoi.kg = isFinite(kg) ? String(Math.round(kg * 10) / 10) : oCu.kg || "";
+        }
+      }
+      return { ...prev, [tenBienThe]: { ...(prev[tenBienThe] || {}), [poId]: oMoi } };
+    });
+  };
+
+  // Tổng hợp preview real-time
+  const preview = useMemo(() => {
+    const lsxTam = { congDoanId, bienTheData };
+    return tinhTongHopLSX(lsxTam, bomChon);
+  }, [congDoanId, bienTheData, bomChon]);
+
+  const handleSubmit = () => {
+    if (!congDoanId) {
+      setError("Vui lòng chọn công đoạn");
+      return;
+    }
+    if (!bomId) {
+      setError("Vui lòng chọn mã Thành phẩm (BOM)");
+      return;
+    }
+    if (selectedPoIds.length === 0) {
+      setError("Chọn ít nhất 1 PO để gộp vào lệnh");
+      return;
+    }
+    if (bienTheListBOM.length === 0) {
+      setError(`BOM này chưa có định mức cho công đoạn "${tenCongDoan(congDoanId)}"`);
+      return;
+    }
+
+    // clean bienTheData: chỉ giữ PO đã chọn, có ít nhất 1 trong 2 số > 0
+    const cleanData = {};
+    bienTheListBOM.forEach((bt) => {
+      const row = {};
+      selectedPoIds.forEach((poId) => {
+        const o = bienTheData[bt.tenBienThe]?.[poId] || {};
+        const kg = Number(o.kg) || 0;
+        const met = Number(o.met) || 0;
+        if (kg > 0 || met > 0) row[poId] = { kg: kg > 0 ? kg : null, met: met > 0 ? met : null };
+      });
+      if (Object.keys(row).length > 0) cleanData[bt.tenBienThe] = row;
+    });
+
+    if (Object.keys(cleanData).length === 0) {
+      setError("Vui lòng nhập số liệu cho ít nhất 1 ô");
+      return;
+    }
+
+    const lsx = {
+      id: initial?.id || uid(),
+      ma: initial?.ma || taoMaLSXTangDan(congDoanId, lsxList),
+      congDoanId,
+      bomId,
+      ngayTao: initial?.ngayTao || nowISO(),
+      trangThai: initial?.trangThai || "dang_chay",
+      poItems: selectedPoIds.map((poId) => ({ poId })),
+      bienTheData: cleanData,
+      donViThu2: isCatDongGoi ? donViThu2 : "m",
+    };
+    onSave(lsx);
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={styles.modalTitle}>{initial ? "Sửa Lệnh sản xuất" : "Tạo Lệnh sản xuất"}</h2>
+          <button onClick={onClose} style={styles.modalCloseBtn}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={styles.modalBody}>
+          {error && (
+            <div style={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {congDoanCoDinh ? (
+            <>
+              <div style={styles.sectionDivider}>1. Công đoạn (đã chọn từ tab lọc)</div>
+              <input
+                style={{ ...styles.input, background: "#EDEFEA", color: "#1A1D1B", fontWeight: 600 }}
+                value={tenCongDoan(congDoanCoDinh)}
+                disabled
+                readOnly
+              />
+            </>
+          ) : (
+            <>
+              <div style={styles.sectionDivider}>1. Chọn công đoạn *</div>
+              <div style={styles.chipGrid}>
+                {CONG_DOAN_LIST.map((cd) => (
+                  <button
+                    key={cd.id}
+                    type="button"
+                    onClick={() => setCongDoanId(cd.id)}
+                    style={{ ...styles.chip, ...(congDoanId === cd.id ? styles.chipActive : {}) }}
+                  >
+                    {cd.ten}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div style={styles.sectionDivider}>2. Chọn mã Thành phẩm / Quy cách *</div>
+          <select style={styles.input} value={bomId} onChange={(e) => { setBomId(e.target.value); setSelectedPoIds([]); setBienTheData({}); }}>
+            <option value="">-- Chọn mã TP --</option>
+            {bomList.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.maTP} {b.quyCach ? `(${b.quyCach})` : ""}
+              </option>
+            ))}
+          </select>
+
+          {bomId && congDoanId && (
+            <>
+              <div style={styles.sectionDivider}>3. Chọn các PO cùng quy cách để gộp *</div>
+              {poKhaDung.length === 0 ? (
+                <div style={styles.warnBox}>
+                  <AlertCircle size={15} />
+                  <span>Không có PO nào đang dùng mã TP này. Vào tab "PO" để tạo PO trước.</span>
+                </div>
+              ) : (
+                <div style={styles.poSelectGrid}>
+                  {poKhaDung.map((po) => (
+                    <button
+                      key={po.id}
+                      type="button"
+                      onClick={() => togglePO(po.id)}
+                      style={{
+                        ...styles.poSelectChip,
+                        ...(selectedPoIds.includes(po.id) ? styles.poSelectChipActive : {}),
+                      }}
+                    >
+                      <span>{po.maPO}</span>
+                      <span style={styles.poSelectSub}>{po.khachHang} · {formatNumber(po.mucTieuMet)}m</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {selectedPoIds.length > 0 && bienTheListBOM.length > 0 && (
+                <>
+                  <div style={styles.sectionDivider}>
+                    4. Nhập kg và {isCatDongGoi ? "đơn vị thứ 2" : "mét"} cho từng{" "}
+                    {CONG_DOAN_LIST.find((c) => c.id === congDoanId)?.nhanGoiBienThe} × PO
+                  </div>
+
+                  {isCatDongGoi && (
+                    <Field label="Đơn vị cho cột thứ 2 (ngoài kg)">
+                      <select style={styles.input} value={donViThu2} onChange={(e) => setDonViThu2(e.target.value)}>
+                        <option value="m">Mét</option>
+                        <option value="pcs">Pcs (cuộn/cuốn/cái)</option>
+                      </select>
+                    </Field>
+                  )}
+
+                  <div style={styles.matrixWrap}>
+                    <table style={styles.matrixTable}>
+                      <thead>
+                        <tr>
+                          <th style={styles.matrixTh}>{CONG_DOAN_LIST.find((c) => c.id === congDoanId)?.nhanGoiBienThe}</th>
+                          {selectedPoIds.map((poId) => {
+                            const po = poList.find((p) => p.id === poId);
+                            return (
+                              <th key={poId} style={styles.matrixTh} colSpan={2}>
+                                {po?.maPO}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                        <tr>
+                          <th style={styles.matrixTh}></th>
+                          {selectedPoIds.map((poId) => (
+                            <React.Fragment key={poId}>
+                              <th style={styles.matrixThSub}>kg</th>
+                              <th style={styles.matrixThSub}>{isCatDongGoi ? (donViThu2 === "pcs" ? "pcs" : "m") : "m"}</th>
+                            </React.Fragment>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bienTheListBOM.map((bt) => (
+                          <tr key={bt.tenBienThe}>
+                            <td style={styles.matrixTdLabel}>{bt.tenBienThe}</td>
+                            {selectedPoIds.map((poId) => {
+                              const o = bienTheData[bt.tenBienThe]?.[poId] || {};
+                              return (
+                                <React.Fragment key={poId}>
+                                  <td style={styles.matrixTd}>
+                                    <input
+                                      type="number"
+                                      style={styles.matrixInput}
+                                      placeholder="0"
+                                      value={o.kg ?? ""}
+                                      onChange={(e) => updateOCell(bt.tenBienThe, poId, "kg", e.target.value)}
+                                    />
+                                  </td>
+                                  <td style={styles.matrixTd}>
+                                    <input
+                                      type="number"
+                                      style={styles.matrixInput}
+                                      placeholder="0"
+                                      value={o.met ?? ""}
+                                      onChange={(e) => updateOCell(bt.tenBienThe, poId, "met", e.target.value)}
+                                    />
+                                  </td>
+                                </React.Fragment>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={styles.matrixHint}>
+                    Gõ 1 ô (kg hoặc {isCatDongGoi && donViThu2 === "pcs" ? "pcs" : "mét"}) sẽ tự tính ô còn lại theo định mức BOM
+                    {isCatDongGoi && donViThu2 === "pcs" ? " (trừ khi đơn vị là Pcs - không quy đổi được, cần nhập tay cả 2)" : ""}.
+                    {!isCatDongGoi && " Số đã tự điền theo mục tiêu mét của PO × hệ số mét mỗi màu — sửa lại tay nếu thực tế khác."}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {preview.tongMetCaLenh > 0 && (
+            <div style={styles.tongHopBoxSticky}>
+              <div style={styles.tongHopTitle}>Tổng hợp lệnh (đang nhập)</div>
+              <div style={styles.tongHopGrid}>
+                <div style={{ ...styles.tongHopItem, background: "#0B3D2E" }}>
+                  <span style={{ ...styles.tongHopName, color: "#CFE3D2" }}>
+                    Tổng {isCatDongGoi && donViThu2 === "pcs" ? "Pcs" : "mét"} cả lệnh
+                  </span>
+                  <span style={{ ...styles.tongHopValue, color: "#fff" }}>{formatNumber(preview.tongMetCaLenh, 1)} {isCatDongGoi && donViThu2 === "pcs" ? "pcs" : "m"}</span>
+                </div>
+                {Object.entries(preview.tongKgTheoBienThe || {}).map(([ten, kg]) =>
+                  kg > 0 ? (
+                    <div key={`kg-${ten}`} style={styles.tongHopItem}>
+                      <span style={styles.tongHopName}>{ten} (đã nhập)</span>
+                      <span style={styles.tongHopValue}>{formatNumber(kg, 1)} kg</span>
+                    </div>
+                  ) : null
+                )}
+                {Object.entries(preview.tongNvl).map(([ten, kg]) => (
+                  <div key={ten} style={styles.tongHopItem}>
+                    <span style={styles.tongHopName}>{ten}</span>
+                    <span style={styles.tongHopValue}>{formatNumber(kg, 1)} kg</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={styles.modalFooter}>
+          <button style={styles.btnGhost} onClick={onClose}>
+            Hủy
+          </button>
+          <button style={styles.btnPrimary} onClick={handleSubmit}>
+            {initial ? "Lưu thay đổi" : "Tạo Lệnh SX"}
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// MODULE GIAO DỊCH (sổ trung tâm)
+// ====================================================================
+// Cấu trúc 1 giao dịch:
+// {
+//   id, ngay, loaiGD: ISSUE_NVL | IN_BTP | OUT_BTP | IN_TP | SCRAP,
+//   gomVao: "lsx" | "po"      -> gắn với LSX hay PO trực tiếp
+//   lsxId, poId,              -> id tương ứng (chỉ 1 trong 2 có giá trị theo gomVao)
+//   congDoanId,
+//   tenBienThe,               -> màu/tên BTP liên quan (nếu có)
+//   tenNVL,                   -> tên NVL/BTP cụ thể
+//   soLuong, donVi: "kg" | "m",
+//   lyDoPhe,                  -> chỉ dùng khi loaiGD = SCRAP
+//   ghiChu,
+// }
+
+const LOAI_GD_LIST = [
+  { id: "ISSUE_NVL", ten: "Xuất NVL", mau: "#C8602F", bg: "#FBEEE4" },
+  { id: "IN_BTP", ten: "Nhập BTP", mau: "#2F6B47", bg: "#E7F0EA" },
+  { id: "OUT_BTP", ten: "Xuất BTP", mau: "#A8632F", bg: "#FBEEE4" },
+  { id: "IN_TP", ten: "Nhập TP", mau: "#0B3D2E", bg: "#E7F0EA" },
+  { id: "SCRAP", ten: "Phế", mau: "#B23A3A", bg: "#F8E9E9" },
+];
+
+// Gợi ý lý do phế: KHÔNG dùng danh sách cố định, chỉ lấy từ các lý do đã từng
+// ghi nhận trước đó trong Giao dịch (giống cách BOM gợi ý tên NVL theo lịch sử)
+function layGoiYLyDoPhe(gdList) {
+  const set = new Set();
+  (gdList || []).forEach((g) => {
+    if (g.loaiGD === "SCRAP" && g.lyDoPhe) set.add(g.lyDoPhe);
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "vi"));
+}
+
+function tenLoaiGD(id) {
+  return LOAI_GD_LIST.find((l) => l.id === id)?.ten || id;
+}
+
+function ModuleGiaoDich({ gdList, persistGD, poList, bomList, lsxList }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingGD, setEditingGD] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [filterLoai, setFilterLoai] = useState("all");
+  // Lọc thêm theo LSX hoặc PO cụ thể, để xem riêng giao dịch của 1 lệnh/đơn
+  const [filterGomVao, setFilterGomVao] = useState(""); // "" | "lsx:<id>" | "po:<id>"
+  // Lọc theo tên NVL/BTP cụ thể, để xem tổng đã xử lý cho đúng loại đó
+  const [filterTen, setFilterTen] = useState("");
+
+  const handleSaveGD = async (gd) => {
+    const exists = gdList.find((g) => g.id === gd.id);
+    if (exists) {
+      await persistGD(gdList.map((g) => (g.id === gd.id ? gd : g)));
+    } else {
+      await persistGD([...gdList, gd]);
+    }
+    setShowForm(false);
+    setEditingGD(null);
+  };
+
+  const handleDelete = async (id) => {
+    await persistGD(gdList.filter((g) => g.id !== id));
+    setConfirmDelete(null);
+  };
+
+  // Danh sách tên NVL/BTP duy nhất đã từng xuất hiện trong Giao dịch, để chọn lọc
+  const tenNvlBtpGoiY = useMemo(() => {
+    const set = new Set();
+    gdList.forEach((g) => {
+      if (g.tenNVL) set.add(g.tenNVL);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "vi"));
+  }, [gdList]);
+
+  const filteredList = useMemo(() => {
+    let list = filterLoai === "all" ? gdList : gdList.filter((g) => g.loaiGD === filterLoai);
+    if (filterGomVao) {
+      const [loai, id] = filterGomVao.split(":");
+      list = list.filter((g) =>
+        loai === "lsx" ? g.gomVao === "lsx" && g.lsxId === id : g.gomVao === "po" && g.poId === id
+      );
+    }
+    if (filterTen) {
+      list = list.filter((g) => g.tenNVL === filterTen);
+    }
+    return list.slice().sort((a, b) => (b.ngay || "").localeCompare(a.ngay || "") || b.id.localeCompare(a.id));
+  }, [gdList, filterLoai, filterGomVao, filterTen]);
+
+  // Tổng cộng theo từng LOẠI giao dịch, riêng cho tên NVL/BTP đang lọc (filterTen).
+  // Không cộng lẫn các loại vào nhau - ví dụ "Đồng 0.195" đã Xuất NVL bao nhiêu kg
+  // tách biệt với đã Nhập BTP bao nhiêu, dù cùng tên.
+  const tongTheoTenFilter = useMemo(() => {
+    if (!filterTen) return null;
+    const map = {};
+    LOAI_GD_LIST.forEach((l) => (map[l.id] = { kg: 0, m: 0, count: 0 }));
+    gdList
+      .filter((g) => g.tenNVL === filterTen)
+      .forEach((g) => {
+        if (!map[g.loaiGD]) return;
+        map[g.loaiGD].count += 1;
+        map[g.loaiGD].kg += Number(g.soLuongKg) || 0;
+        map[g.loaiGD].m += Number(g.soLuongMet) || 0;
+      });
+    return map;
+  }, [gdList, filterTen]);
+
+  return (
+    <div>
+      <div style={styles.moduleHeader}>
+        <div>
+          <h2 style={styles.moduleTitle}>Giao dịch</h2>
+          <p style={styles.moduleSub}>Sổ nhập liệu thực tế hàng ngày — xuất NVL, nhập/xuất BTP, nhập TP, phế</p>
+        </div>
+        <button
+          style={styles.btnPrimary}
+          onClick={() => {
+            setEditingGD(null);
+            setShowForm(true);
+          }}
+        >
+          <Plus size={18} />
+          <span>Ghi giao dịch</span>
+        </button>
+      </div>
+
+      <div style={styles.filterRow}>
+        <button
+          onClick={() => setFilterLoai("all")}
+          style={{ ...styles.filterTab, ...(filterLoai === "all" ? styles.filterTabActive : {}) }}
+        >
+          Tất cả
+        </button>
+        {LOAI_GD_LIST.map((l) => (
+          <button
+            key={l.id}
+            onClick={() => setFilterLoai(l.id)}
+            style={{ ...styles.filterTab, ...(filterLoai === l.id ? styles.filterTabActive : {}) }}
+          >
+            {l.ten}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.gdFilterGomVaoRow}>
+        <Field label="Lọc theo Lệnh SX hoặc PO (xem riêng giao dịch của 1 lệnh/đơn)">
+          <select style={styles.input} value={filterGomVao} onChange={(e) => setFilterGomVao(e.target.value)}>
+            <option value="">-- Tất cả LSX/PO --</option>
+            {lsxList.length > 0 && (
+              <optgroup label="Lệnh sản xuất">
+                {lsxList.map((l) => (
+                  <option key={l.id} value={`lsx:${l.id}`}>
+                    {l.ma} ({tenCongDoan(l.congDoanId)})
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {poList.length > 0 && (
+              <optgroup label="PO">
+                {poList.map((p) => (
+                  <option key={p.id} value={`po:${p.id}`}>
+                    {p.maPO} — {p.khachHang}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </Field>
+        <Field label="Lọc theo tên NVL/BTP (xem tổng đã xử lý cho 1 loại)">
+          <select style={styles.input} value={filterTen} onChange={(e) => setFilterTen(e.target.value)}>
+            <option value="">-- Tất cả NVL/BTP --</option>
+            {tenNvlBtpGoiY.map((ten) => (
+              <option key={ten} value={ten}>
+                {ten}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      {tongTheoTenFilter && (
+        <div style={styles.gdTongTheoTenBox}>
+          <div style={styles.gdTongTheoTenTitle}>Tổng cộng "{filterTen}" theo từng loại giao dịch</div>
+          <div style={styles.gdSummaryGrid}>
+            {LOAI_GD_LIST.map((l) => {
+              const t = tongTheoTenFilter[l.id];
+              if (t.count === 0) return null;
+              return (
+                <div key={l.id} style={{ ...styles.gdSummaryCard, borderColor: l.bg }}>
+                  <span style={{ ...styles.gdSummaryLabel, color: l.mau }}>{l.ten}</span>
+                  <span style={styles.gdSummaryValue}>
+                    {t.kg > 0 && `${formatNumber(t.kg, 1)} kg`}
+                    {t.kg > 0 && t.m > 0 && " · "}
+                    {t.m > 0 && `${formatNumber(t.m, 1)} m`}
+                  </span>
+                  <span style={styles.gdSummaryCount}>{t.count} giao dịch</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {filteredList.length === 0 ? (
+        <div style={styles.emptyState}>
+          <ClipboardList size={40} color="#A9AFA6" />
+          <p style={styles.emptyTitle}>Chưa có giao dịch nào</p>
+          <p style={styles.emptySub}>Ghi nhận giao dịch đầu tiên để bắt đầu theo dõi thực tế sản xuất</p>
+        </div>
+      ) : (
+        <div style={styles.gdList}>
+          {filteredList.map((gd) => (
+            <GDRow
+              key={gd.id}
+              gd={gd}
+              poList={poList}
+              lsxList={lsxList}
+              onEdit={() => {
+                setEditingGD(gd);
+                setShowForm(true);
+              }}
+              onDelete={() => setConfirmDelete(gd.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <GDFormModal
+          initial={editingGD}
+          poList={poList}
+          bomList={bomList}
+          lsxList={lsxList}
+          gdList={gdList}
+          loaiCoDinh={!editingGD && filterLoai !== "all" ? filterLoai : null}
+          onClose={() => {
+            setShowForm(false);
+            setEditingGD(null);
+          }}
+          onSave={handleSaveGD}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          message="Xóa giao dịch này? Số liệu tồn kho và báo cáo sẽ được tính lại ngay."
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => handleDelete(confirmDelete)}
+        />
+      )}
+    </div>
+  );
+}
+
+function GDRow({ gd, poList, lsxList, onEdit, onDelete }) {
+  const loai = LOAI_GD_LIST.find((l) => l.id === gd.loaiGD);
+  const po = gd.gomVao === "po" ? poList.find((p) => p.id === gd.poId) : null;
+  const lsx = gd.gomVao === "lsx" ? lsxList.find((l) => l.id === gd.lsxId) : null;
+
+  return (
+    <div style={styles.gdRow}>
+      <div style={styles.gdRowLeft}>
+        <span style={{ ...styles.gdLoaiBadge, background: loai?.bg, color: loai?.mau }}>{loai?.ten}</span>
+        <div>
+          <div style={styles.gdRowMain}>
+            {gd.tenNVL || gd.tenBienThe || tenCongDoan(gd.congDoanId)}
+            {gd.tenBienThe && gd.tenNVL && <span style={styles.gdRowSub}> · {gd.tenBienThe}</span>}
+          </div>
+          <div style={styles.gdRowMeta}>
+            {gd.ngay} · {tenCongDoan(gd.congDoanId)} ·{" "}
+            {lsx ? `LSX ${lsx.ma}` : po ? `PO ${po.maPO}` : ""}
+            {gd.loaiGD === "SCRAP" && gd.lyDoPhe ? ` · Lý do: ${gd.lyDoPhe}` : ""}
+          </div>
+        </div>
+      </div>
+      <div style={styles.gdRowRight}>
+        <span style={styles.gdSoLuong}>
+          {gd.soLuongKg ? `${formatNumber(gd.soLuongKg, 1)} kg` : ""}
+          {gd.soLuongKg && gd.soLuongMet ? " · " : ""}
+          {gd.soLuongMet ? `${formatNumber(gd.soLuongMet, 1)} ${gd.donViSoLuongMet === "pcs" ? "pcs" : "m"}` : ""}
+        </span>
+        <button onClick={onEdit} style={styles.iconBtn}>
+          <Edit3 size={15} />
+        </button>
+        <button onClick={onDelete} style={{ ...styles.iconBtn, color: "#B23A3A" }}>
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GDFormModal({ initial, poList, bomList, lsxList, gdList, loaiCoDinh, onClose, onSave }) {
+  const [ngay, setNgay] = useState(initial?.ngay || todayISO());
+  const [loaiGD, setLoaiGD] = useState(initial?.loaiGD || loaiCoDinh || "ISSUE_NVL");
+  const [gomVao, setGomVao] = useState(initial?.gomVao || "lsx"); // "lsx" | "po"
+  const [lsxId, setLsxId] = useState(initial?.lsxId || "");
+  const [lsxDichId, setLsxDichId] = useState(initial?.lsxDichId || ""); // riêng cho Xuất BTP: LSX đích cụ thể (không chỉ công đoạn)
+  const [poId, setPoId] = useState(initial?.poId || "");
+  const [congDoanId, setCongDoanId] = useState(initial?.congDoanId || "");
+  const [tenBienThe, setTenBienThe] = useState(initial?.tenBienThe || "");
+  const [tenNVL, setTenNVL] = useState(initial?.tenNVL || "");
+  const [soLuongKg, setSoLuongKg] = useState(initial?.soLuongKg != null ? String(initial.soLuongKg) : "");
+  const [soLuongMet, setSoLuongMet] = useState(initial?.soLuongMet != null ? String(initial.soLuongMet) : "");
+  const [donViCatDongGoi, setDonViCatDongGoi] = useState(initial?.donViSoLuongMet || "m");
+  const [lastEdited, setLastEdited] = useState(null); // "kg" | "met" - ô vừa gõ tay gần nhất
+  const [lyDoPhe, setLyDoPhe] = useState(initial?.lyDoPhe || "");
+  const [ghiChu, setGhiChu] = useState(initial?.ghiChu || "");
+  const [error, setError] = useState("");
+
+  const lsxChon = lsxList.find((l) => l.id === lsxId);
+  const poChon = poList.find((p) => p.id === poId);
+  const bomLienQuan = gomVao === "lsx" ? bomList.find((b) => b.id === lsxChon?.bomId) : bomList.find((b) => b.id === poChon?.bomId);
+
+  // Với Xuất BTP từ LSX: congDoanId là ĐÍCH (nơi dùng), còn biến thể/màu và định mức
+  // phải tra theo công đoạn NGUỒN (đúng công đoạn của LSX đang xuất ra), không phải đích.
+  // Các loại giao dịch khác: nguồn = đích = congDoanId như cũ.
+  const congDoanTraCuuBienThe =
+    loaiGD === "OUT_BTP" && gomVao === "lsx" ? lsxChon?.congDoanId || "" : congDoanId;
+
+  // Gợi ý biến thể (màu/tên BTP) theo đúng công đoạn nguồn + BOM liên quan
+  const bienTheGoiY = useMemo(() => {
+    if (!bomLienQuan || !congDoanTraCuuBienThe) return [];
+    const list = bomLienQuan.dinhMuc?.[congDoanTraCuuBienThe] || [];
+    return list.map((bt) => bt.tenBienThe);
+  }, [bomLienQuan, congDoanTraCuuBienThe]);
+
+  // Gợi ý tên NVL theo đúng công đoạn nguồn + biến thể đã chọn trong BOM
+  const nvlGoiY = useMemo(() => {
+    if (!bomLienQuan || !congDoanTraCuuBienThe) return [];
+    const list = bomLienQuan.dinhMuc?.[congDoanTraCuuBienThe] || [];
+    const bt = list.find((b) => b.tenBienThe === tenBienThe);
+    if (bt) return bt.nvlList.map((n) => n.ten);
+    // Nếu chưa chọn đúng biến thể, gợi ý hết NVL của công đoạn đó
+    const set = new Set();
+    list.forEach((b) => b.nvlList.forEach((n) => set.add(n.ten)));
+    return Array.from(set);
+  }, [bomLienQuan, congDoanTraCuuBienThe, tenBienThe]);
+
+  // Định mức (kg/m) dùng để quy đổi qua lại giữa kg và mét cho Nhập/Xuất BTP.
+  // Dùng TỔNG định mức tất cả NVL trong đúng biến thể/màu đang chọn, tra theo
+  // công đoạn NGUỒN (giống cách Lệnh SX đã làm) - không cần chọn riêng từng NVL.
+  const dinhMucQuyDoi = useMemo(() => {
+    if (!bomLienQuan || !congDoanTraCuuBienThe || !tenBienThe) return null;
+    const list = bomLienQuan.dinhMuc?.[congDoanTraCuuBienThe] || [];
+    const bt = list.find((b) => b.tenBienThe === tenBienThe);
+    if (!bt) return null;
+    return sumNVL(bt.nvlList) || null;
+  }, [bomLienQuan, congDoanTraCuuBienThe, tenBienThe]);
+
+  const congDoanKhaDung = gomVao === "lsx" ? (lsxChon ? [lsxChon.congDoanId] : []) : CONG_DOAN_LIST.map((c) => c.id);
+  const loaiHienTai = LOAI_GD_LIST.find((l) => l.id === loaiGD);
+  // Tên màu/BTP chỉ có ý nghĩa với BTP (Nhập/Xuất BTP), Xuất NVL thô và Nhập TP/Phế
+  // không cần biến thể này — ẩn ô khi không liên quan, tránh gây rối như bạn phản hồi
+  // Tên màu/BTP dùng cho Nhập/Xuất BTP và cả Nhập TP (lúc đóng gói xong, tên chính
+  // là tên BTP/quy cách của LSX Cắt đóng gói đó) - không còn ô "Tên NVL" riêng nữa
+  const canNhapBienThe = loaiGD === "IN_BTP" || loaiGD === "OUT_BTP" || loaiGD === "IN_TP";
+  // Chỉ tự quy đổi kg<->mét khi có biến thể + định mức rõ ràng (Nhập/Xuất BTP).
+  // Xuất NVL thô không có biến thể cụ thể nên không tự tính được mét tương ứng.
+  const canQuyDoi = canNhapBienThe && dinhMucQuyDoi;
+
+  // Khi gõ tay 1 ô, tự tính ô còn lại theo định mức (nếu đủ điều kiện quy đổi)
+  const handleChangeKg = (val) => {
+    setSoLuongKg(val);
+    setLastEdited("kg");
+    if (canQuyDoi && val !== "") {
+      const met = Number(val) / dinhMucQuyDoi;
+      setSoLuongMet(isFinite(met) ? String(Math.round(met * 10) / 10) : "");
+    }
+  };
+  const handleChangeMet = (val) => {
+    setSoLuongMet(val);
+    setLastEdited("met");
+    if (canQuyDoi && val !== "") {
+      const kg = Number(val) * dinhMucQuyDoi;
+      setSoLuongKg(isFinite(kg) ? String(Math.round(kg * 10) / 10) : "");
+    }
+  };
+
+  const handleSubmit = () => {
+    if (gomVao === "lsx" && !lsxId) {
+      setError("Vui lòng chọn Lệnh sản xuất");
+      return;
+    }
+    if (gomVao === "po" && !poId) {
+      setError("Vui lòng chọn PO");
+      return;
+    }
+    if (!congDoanId) {
+      setError("Vui lòng chọn công đoạn");
+      return;
+    }
+    const kg = soLuongKg === "" ? 0 : Number(soLuongKg);
+    const met = soLuongMet === "" ? 0 : Number(soLuongMet);
+    if (kg <= 0 && met <= 0) {
+      setError("Vui lòng nhập số kg hoặc số mét lớn hơn 0");
+      return;
+    }
+    if (canNhapBienThe && !tenBienThe.trim()) {
+      setError("Vui lòng nhập tên màu/BTP");
+      return;
+    }
+    if (loaiGD === "OUT_BTP" && gomVao === "lsx" && !lsxDichId) {
+      setError("Vui lòng chọn LSX đích (nơi dùng BTP này)");
+      return;
+    }
+    if (loaiGD === "ISSUE_NVL" && !tenNVL.trim()) {
+      setError("Vui lòng nhập tên NVL cần xuất");
+      return;
+    }
+    if (loaiGD === "SCRAP" && !lyDoPhe.trim()) {
+      setError("Vui lòng nhập lý do phế");
+      return;
+    }
+
+    const gd = {
+      id: initial?.id || uid(),
+      ngay,
+      loaiGD,
+      gomVao,
+      lsxId: gomVao === "lsx" ? lsxId : null,
+      poId: gomVao === "po" ? poId : null,
+      congDoanId,
+      // congDoanNguon: với Xuất BTP từ LSX, đây là công đoạn THẬT của LSX nguồn
+      // (dùng để trừ đúng tồn kho của lệnh đó). Các loại khác = congDoanId.
+      congDoanNguon: loaiGD === "OUT_BTP" && gomVao === "lsx" ? lsxChon?.congDoanId || congDoanId : congDoanId,
+      // lsxDichId: chỉ có ý nghĩa với Xuất BTP từ LSX - LSX cụ thể đang nhận BTP này,
+      // dùng để tính chính xác "đầu vào đã nhận" cho đúng lệnh, không lẫn các lệnh
+      // khác cùng công đoạn chạy song song
+      lsxDichId: loaiGD === "OUT_BTP" && gomVao === "lsx" ? lsxDichId : null,
+      tenBienThe: tenBienThe.trim(),
+      // Với Nhập/Xuất BTP không còn ô NVL riêng (chỉ còn Tên màu/BTP), nên lưu
+      // tenNVL = tenBienThe để các nơi khác (Dashboard tổng hợp theo tenNVL) vẫn
+      // có dữ liệu hợp lệ, không bị rỗng
+      tenNVL: canNhapBienThe ? tenBienThe.trim() : tenNVL.trim(),
+      soLuongKg: kg > 0 ? kg : null,
+      soLuongMet: met > 0 ? met : null,
+      donViSoLuongMet: congDoanId === "cat_dong_goi" ? donViCatDongGoi : "m",
+      lyDoPhe: loaiGD === "SCRAP" ? lyDoPhe.trim() : "",
+      ghiChu: ghiChu.trim(),
+    };
+    onSave(gd);
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={styles.modalTitle}>
+            {initial ? `Sửa giao dịch — ${loaiHienTai?.ten}` : loaiCoDinh ? `Ghi giao dịch — ${loaiHienTai?.ten}` : "Ghi giao dịch mới"}
+          </h2>
+          <button onClick={onClose} style={styles.modalCloseBtn}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={styles.modalBody}>
+          {error && (
+            <div style={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {loaiCoDinh ? (
+            <Field label="Ngày">
+              <input type="date" style={styles.input} value={ngay} onChange={(e) => setNgay(e.target.value)} />
+            </Field>
+          ) : (
+            <div style={styles.formRow2}>
+              <Field label="Ngày">
+                <input type="date" style={styles.input} value={ngay} onChange={(e) => setNgay(e.target.value)} />
+              </Field>
+              <Field label="Loại giao dịch *">
+                <select style={styles.input} value={loaiGD} onChange={(e) => setLoaiGD(e.target.value)}>
+                  {LOAI_GD_LIST.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.ten}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
+
+          <div style={styles.sectionDivider}>Gắn với *</div>
+          <div style={styles.chipGrid}>
+            <button
+              type="button"
+              onClick={() => {
+                setGomVao("lsx");
+                setPoId("");
+                setCongDoanId("");
+              }}
+              style={{ ...styles.chip, ...(gomVao === "lsx" ? styles.chipActive : {}) }}
+            >
+              Lệnh sản xuất (LSX)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGomVao("po");
+                setLsxId("");
+                setCongDoanId("");
+              }}
+              style={{ ...styles.chip, ...(gomVao === "po" ? styles.chipActive : {}) }}
+            >
+              PO trực tiếp
+            </button>
+          </div>
+
+          {gomVao === "lsx" ? (
+            lsxList.length === 0 ? (
+              <div style={styles.warnBox}>
+                <AlertCircle size={15} />
+                <span>Chưa có Lệnh sản xuất nào. Vào tab "Lệnh SX" để tạo trước.</span>
+              </div>
+            ) : (
+              <div style={styles.formRow2}>
+                <Field label={loaiGD === "OUT_BTP" ? "LSX nguồn (lấy BTP từ đâu) *" : "Chọn Lệnh sản xuất *"}>
+                  <select
+                    style={styles.input}
+                    value={lsxId}
+                    onChange={(e) => {
+                      setLsxId(e.target.value);
+                      const l = lsxList.find((x) => x.id === e.target.value);
+                      // Xuất BTP: công đoạn là ĐÍCH (tổ trưởng tự chọn), không khóa theo LSX nguồn
+                      if (loaiGD !== "OUT_BTP") setCongDoanId(l ? l.congDoanId : "");
+                    }}
+                  >
+                    <option value="">-- Chọn LSX --</option>
+                    {lsxList.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.ma} — {tenCongDoan(l.congDoanId)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {loaiGD === "OUT_BTP" ? (
+                  <Field label="LSX đích (nơi dùng BTP này) *">
+                    <select
+                      style={styles.input}
+                      value={lsxDichId}
+                      onChange={(e) => {
+                        setLsxDichId(e.target.value);
+                        const lDich = lsxList.find((x) => x.id === e.target.value);
+                        setCongDoanId(lDich ? lDich.congDoanId : "");
+                      }}
+                    >
+                      <option value="">-- Chọn LSX đích --</option>
+                      {lsxList
+                        .filter((l) => l.id !== lsxId) // không cho chọn chính LSX nguồn làm đích
+                        .map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.ma} — {tenCongDoan(l.congDoanId)}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                ) : (
+                  <Field label="Công đoạn (tự xác định theo LSX)">
+                    <input
+                      style={{ ...styles.input, background: "#EDEFEA", color: lsxChon ? "#1A1D1B" : "#8B9189", fontWeight: 600 }}
+                      value={lsxChon ? tenCongDoan(lsxChon.congDoanId) : ""}
+                      placeholder="Chọn LSX trước"
+                      disabled
+                      readOnly
+                    />
+                  </Field>
+                )}
+              </div>
+            )
+          ) : poList.length === 0 ? (
+            <div style={styles.warnBox}>
+              <AlertCircle size={15} />
+              <span>Chưa có PO nào. Vào tab "PO" để tạo trước.</span>
+            </div>
+          ) : (
+            <div style={styles.formRow2}>
+              <Field label="Chọn PO *">
+                <POSearchSelect poList={poList} value={poId} onChange={setPoId} />
+              </Field>
+              <Field label="Công đoạn * (chọn tay)">
+                <select style={styles.input} value={congDoanId} onChange={(e) => setCongDoanId(e.target.value)}>
+                  <option value="">-- Chọn công đoạn --</option>
+                  {CONG_DOAN_LIST.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.ten}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
+
+          <div style={styles.sectionDivider}>Chi tiết</div>
+          {canNhapBienThe ? (
+            <Field label={`Tên màu/BTP ${congDoanId ? `(${CONG_DOAN_LIST.find((c) => c.id === congDoanId)?.nhanGoiBienThe || ""})` : ""}`}>
+              <input
+                style={styles.input}
+                value={tenBienThe}
+                onChange={(e) => setTenBienThe(e.target.value)}
+                placeholder="VD: GR, hoặc tên BTP"
+                list="gd-bienthe-goi-y"
+              />
+            </Field>
+          ) : (
+            <Field
+              label={
+                loaiGD === "ISSUE_NVL"
+                  ? "Tên NVL *"
+                  : loaiGD === "SCRAP"
+                  ? "Tên phế"
+                  : "Tên NVL/BTP"
+              }
+            >
+              <input
+                style={styles.input}
+                value={tenNVL}
+                onChange={(e) => setTenNVL(e.target.value)}
+                placeholder={loaiGD === "SCRAP" ? "VD: Đồng vụn, Nhựa thừa..." : "VD: Đồng 0.195"}
+                list="gd-nvl-goi-y"
+              />
+            </Field>
+          )}
+          <datalist id="gd-bienthe-goi-y">
+            {bienTheGoiY.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+          <datalist id="gd-nvl-goi-y">
+            {nvlGoiY.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+
+          {loaiGD === "SCRAP" ? (
+            <Field label="Số lượng (kg) *">
+              <input
+                type="number"
+                style={styles.input}
+                value={soLuongKg}
+                onChange={(e) => handleChangeKg(e.target.value)}
+                placeholder="0"
+                step="0.1"
+              />
+            </Field>
+          ) : (
+            <div style={styles.formRow2}>
+              <Field label={`Số lượng (kg)${canQuyDoi ? "" : " *"}`}>
+                <input
+                  type="number"
+                  style={styles.input}
+                  value={soLuongKg}
+                  onChange={(e) => handleChangeKg(e.target.value)}
+                  placeholder="0"
+                  step="0.1"
+                />
+              </Field>
+              <Field
+                label={
+                  congDoanId === "cat_dong_goi"
+                    ? "Số lượng (mét hoặc Pcs)"
+                    : `Số lượng (mét)${canQuyDoi ? " — tự tính" : ""}`
+                }
+              >
+                <input
+                  type="number"
+                  style={styles.input}
+                  value={soLuongMet}
+                  onChange={(e) => handleChangeMet(e.target.value)}
+                  placeholder="0"
+                  step="0.1"
+                />
+              </Field>
+            </div>
+          )}
+          {congDoanId === "cat_dong_goi" && loaiGD !== "SCRAP" && (
+            <Field label="Đơn vị cho số ở ô bên phải">
+              <select style={styles.input} value={donViCatDongGoi} onChange={(e) => setDonViCatDongGoi(e.target.value)}>
+                <option value="m">Mét</option>
+                <option value="pcs">Pcs (cuộn/cuốn/cái)</option>
+              </select>
+            </Field>
+          )}
+          {canQuyDoi && (
+            <div style={styles.quyDoiHint}>
+              Tự quy đổi theo tổng định mức BOM của "{tenBienThe}": 1 mét = {formatNumber(dinhMucQuyDoi, 6)} kg
+            </div>
+          )}
+
+          {loaiGD === "SCRAP" && (
+            <Field label="Lý do phế *">
+              <input
+                style={styles.input}
+                value={lyDoPhe}
+                onChange={(e) => setLyDoPhe(e.target.value)}
+                placeholder="VD: Đứt đồng (gõ tự do, gợi ý từ các lần ghi trước)"
+                list="ly-do-phe-goi-y"
+              />
+              <datalist id="ly-do-phe-goi-y">
+                {layGoiYLyDoPhe(gdList).map((l) => (
+                  <option key={l} value={l} />
+                ))}
+              </datalist>
+            </Field>
+          )}
+
+          <Field label="Ghi chú">
+            <input style={styles.input} value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} placeholder="Không bắt buộc" />
+          </Field>
+        </div>
+
+        <div style={styles.modalFooter}>
+          <button style={styles.btnGhost} onClick={onClose}>
+            Hủy
+          </button>
+          <button style={styles.btnPrimary} onClick={handleSubmit}>
+            {initial ? "Lưu thay đổi" : "Lưu giao dịch"}
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// MODULE DASHBOARD
+// ====================================================================
+function ModuleDashboard({ poList, bomList, lsxList, gdList }) {
+  const [poFilter, setPoFilter] = useState("all");
+  const [poDetailId, setPoDetailId] = useState("");
+  // Lọc theo khoảng ngày, áp dụng cho dữ liệu Giao dịch khi tính KPI/phế/tiến độ
+  const [tuNgay, setTuNgay] = useState("");
+  const [denNgay, setDenNgay] = useState("");
+
+  // gdList đã lọc theo khoảng ngày (nếu có chọn) - dùng cho toàn bộ tính toán Dashboard
+  const gdListLoc = useMemo(() => {
+    if (!tuNgay && !denNgay) return gdList;
+    return gdList.filter((g) => {
+      const ngayGD = (g.ngay || "").slice(0, 10);
+      if (tuNgay && ngayGD < tuNgay) return false;
+      if (denNgay && ngayGD > denNgay) return false;
+      return true;
+    });
+  }, [gdList, tuNgay, denNgay]);
+
+  const stats = useMemo(() => {
+    const dangChay = poList.filter((p) => p.trangThai === "dang_chay").length;
+    const hoanTat = poList.filter((p) => p.trangThai === "hoan_tat").length;
+    const tongMetMucTieu = poList.reduce((acc, p) => acc + (Number(p.mucTieuMet) || 0), 0);
+    return { dangChay, hoanTat, tongMetMucTieu, total: poList.length };
+  }, [poList]);
+
+  // Phế theo lý do (tính theo kg) - và tổng phế + tỷ lệ phế cho KPI dòng trên cùng
+  const pheTheoLyDo = useMemo(() => {
+    const map = {};
+    gdListLoc
+      .filter((g) => g.loaiGD === "SCRAP")
+      .forEach((g) => {
+        const ly = g.lyDoPhe || "Khác";
+        map[ly] = (map[ly] || 0) + (Number(g.soLuongKg) || 0);
+      });
+    return Object.entries(map)
+      .map(([lyDo, kg]) => ({ lyDo, kg }))
+      .sort((a, b) => b.kg - a.kg);
+  }, [gdListLoc]);
+
+  const pheStats = useMemo(() => {
+    const tongPhe = pheTheoLyDo.reduce((acc, x) => acc + x.kg, 0);
+    // Tỷ lệ phế = tổng phế / tổng NVL đã xuất (ISSUE_NVL) trong cùng khoảng lọc -
+    // mẫu số dùng NVL xuất ra vì đó là "đầu vào" để so phế phát sinh từ đó
+    const tongXuatNVL = gdListLoc
+      .filter((g) => g.loaiGD === "ISSUE_NVL")
+      .reduce((acc, g) => acc + (Number(g.soLuongKg) || 0), 0);
+    const tyLePhe = tongXuatNVL > 0 ? (tongPhe / tongXuatNVL) * 100 : 0;
+    return { tongPhe, tyLePhe };
+  }, [pheTheoLyDo, gdListLoc]);
+
+  // Tiến độ Nhập TP theo từng PO (KH vs TT) - tính theo mét
+  const tienDoPO = useMemo(() => {
+    return poList.map((po) => {
+      const tongNhapTP = gdListLoc
+        .filter((g) => g.loaiGD === "IN_TP" && g.gomVao === "po" && g.poId === po.id)
+        .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+      const phanTram = po.mucTieuMet > 0 ? Math.min(100, (tongNhapTP / po.mucTieuMet) * 100) : 0;
+      return { po, tongNhapTP, phanTram };
+    });
+  }, [poList, gdListLoc]);
+
+  const tienDoPOFiltered = useMemo(() => {
+    if (poFilter === "all") return tienDoPO;
+    if (poFilter === "dang_chay") return tienDoPO.filter((x) => x.po.trangThai === "dang_chay");
+    return tienDoPO.filter((x) => x.po.trangThai === "hoan_tat");
+  }, [tienDoPO, poFilter]);
+
+  // Tiến độ Lệnh SX (mét lệnh đã Nhập BTP / tổng mét lệnh cần)
+  const tienDoLSX = useMemo(() => {
+    return lsxList.map((lsx) => {
+      const bom = bomList.find((b) => b.id === lsx.bomId);
+      const { tongMetCaLenh } = tinhTongHopLSX(lsx, bom);
+      const tongNhap = gdListLoc
+        .filter((g) => g.loaiGD === "IN_BTP" && g.gomVao === "lsx" && g.lsxId === lsx.id)
+        .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+      const phanTram = tongMetCaLenh > 0 ? Math.min(100, (tongNhap / tongMetCaLenh) * 100) : 0;
+      return { lsx, tongMetCaLenh, tongNhap, phanTram };
+    });
+  }, [lsxList, bomList, gdListLoc]);
+
+  // ==== CHI TIẾT THEO 1 PO CỤ THỂ (chế độ xem sâu, giống mockup) ====
+  const poDetail = poDetailId ? poList.find((p) => p.id === poDetailId) : null;
+  const poDetailBom = poDetail ? bomList.find((b) => b.id === poDetail.bomId) : null;
+
+  const chiTietPO = useMemo(() => {
+    if (!poDetail || !poDetailBom) return null;
+
+    // Cascade kế hoạch (KH) từ mục tiêu mét TP
+    const cascadeKH = tinhCascadeBOM(poDetailBom, poDetail.mucTieuMet);
+
+    // Giao dịch thực tế gắn trực tiếp với PO này, hoặc gắn qua LSX có chứa PO này
+    const lsxChuaPO = lsxList.filter((l) => l.poItems?.some((it) => it.poId === poDetail.id));
+    const lsxIdsChuaPO = new Set(lsxChuaPO.map((l) => l.id));
+
+    const gdLienQuan = gdListLoc.filter(
+      (g) => (g.gomVao === "po" && g.poId === poDetail.id) || (g.gomVao === "lsx" && lsxIdsChuaPO.has(g.lsxId))
+    );
+
+    // Tổng NVL xuất thực tế (ISSUE_NVL) liên quan PO này — lưu ý: nếu qua LSX gộp,
+    // đây là số của CẢ lệnh, chỉ mang tính tham khảo tỷ trọng, không tách chính xác theo PO
+    const tongXuatNVL_TT = {};
+    gdLienQuan
+      .filter((g) => g.loaiGD === "ISSUE_NVL")
+      .forEach((g) => {
+        tongXuatNVL_TT[g.tenNVL] = (tongXuatNVL_TT[g.tenNVL] || 0) + (Number(g.soLuongKg) || 0);
+      });
+
+    // Tổng phế liên quan (tính theo kg)
+    const tongPhe = gdLienQuan
+      .filter((g) => g.loaiGD === "SCRAP")
+      .reduce((acc, g) => acc + (Number(g.soLuongKg) || 0), 0);
+
+    const pheTheoLyDoPO = {};
+    gdLienQuan
+      .filter((g) => g.loaiGD === "SCRAP")
+      .forEach((g) => {
+        const ly = g.lyDoPhe || "Khác";
+        pheTheoLyDoPO[ly] = (pheTheoLyDoPO[ly] || 0) + (Number(g.soLuongKg) || 0);
+      });
+
+    // Tiến độ theo công đoạn: mét Nhập BTP (qua LSX hoặc trực tiếp) / mét KH (cascade) của công đoạn đó
+    const tienDoCongDoan = CONG_DOAN_LIST.map((cd) => {
+      const rowsKH = cascadeKH.chiTiet.filter((r) => r.congDoanId === cd.id);
+      const metKH = rowsKH.reduce((acc, r) => acc + r.metCongDoan, 0);
+      const metTT = gdLienQuan
+        .filter((g) => g.loaiGD === "IN_BTP" && g.congDoanId === cd.id)
+        .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+      // Thành phẩm tính riêng từ IN_TP
+      const metTT_TP =
+        cd.id === "cat_dong_goi"
+          ? gdLienQuan
+              .filter((g) => g.loaiGD === "IN_TP")
+              .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0)
+          : metTT;
+      const mocSoSanh = cd.id === "cat_dong_goi" ? poDetail.mucTieuMet : metKH;
+      const ttSoSanh = cd.id === "cat_dong_goi" ? metTT_TP : metTT;
+      const phanTram = mocSoSanh > 0 ? Math.min(100, (ttSoSanh / mocSoSanh) * 100) : 0;
+      return { congDoan: cd, metKH: mocSoSanh, metTT: ttSoSanh, phanTram };
+    }).filter((row) => row.metKH > 0);
+
+    // Tỷ lệ hoàn thành theo từng màu Lõi (KH cascade vs TT giao dịch IN_BTP đúng màu đó)
+    const hoanThanhTheoMau = cascadeKH.chiTiet
+      .filter((r) => r.congDoanId === "loi")
+      .map((r) => {
+        const metTT = gdLienQuan
+          .filter((g) => g.loaiGD === "IN_BTP" && g.congDoanId === "loi" && g.tenBienThe === r.tenBienThe)
+          .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+        const phanTram = r.metCongDoan > 0 ? Math.min(150, (metTT / r.metCongDoan) * 100) : 0;
+        return { tenMau: r.tenBienThe, metKH: r.metCongDoan, metTT, phanTram };
+      });
+
+    // Hao hụt NVL: KH (cascade) vs TT (xuất thực tế)
+    const haoHutNVL = cascadeKH.tongTheoNvl.map((item) => {
+      const tt = tongXuatNVL_TT[item.ten] || 0;
+      return { ten: item.ten, kh: item.kg, tt, chenhLech: tt - item.kg };
+    });
+
+    const tongKH = cascadeKH.tongKg;
+    const tongTT = Object.values(tongXuatNVL_TT).reduce((a, b) => a + b, 0);
+    const tyLePhe = tongTT > 0 ? (tongPhe / tongTT) * 100 : 0;
+
+    // Chuỗi công đoạn của PO này — sắp đúng thứ tự Lõi → Xoắn đôi → Vách → ...
+    // Mỗi công đoạn: nếu PO này có trong 1 LSX của công đoạn đó, hiện LSX + % hoàn
+    // thành của CHÍNH LSX đó (cả lệnh, vì gộp nhiều PO); nếu không qua LSX nào,
+    // đánh dấu "Chưa có Lệnh SX" để biết cần tạo lệnh.
+    const chuoiCongDoan = CONG_DOAN_LIST.filter((cd) => poDetailBom.congDoanApDung?.includes(cd.id)).map((cd) => {
+      const lsxCuaCD = lsxChuaPO.find((l) => l.congDoanId === cd.id);
+      if (!lsxCuaCD) {
+        return { congDoan: cd, lsx: null, phanTram: 0, tongMetLSX: 0, tongNhapLSX: 0 };
+      }
+      const { tongMetCaLenh } = tinhTongHopLSX(lsxCuaCD, poDetailBom);
+      const tongNhap = gdList
+        .filter((g) => g.loaiGD === "IN_BTP" && g.gomVao === "lsx" && g.lsxId === lsxCuaCD.id)
+        .reduce((acc, g) => acc + (Number(g.soLuongMet) || 0), 0);
+      const phanTram = tongMetCaLenh > 0 ? Math.min(100, (tongNhap / tongMetCaLenh) * 100) : 0;
+      return { congDoan: cd, lsx: lsxCuaCD, phanTram, tongMetLSX: tongMetCaLenh, tongNhapLSX: tongNhap };
+    });
+
+    return {
+      cascadeKH,
+      tienDoCongDoan,
+      hoanThanhTheoMau,
+      haoHutNVL,
+      tongKH,
+      tongTT,
+      tongPhe,
+      tyLePhe,
+      pheTheoLyDoPO: Object.entries(pheTheoLyDoPO)
+        .map(([lyDo, kg]) => ({ lyDo, kg }))
+        .sort((a, b) => b.kg - a.kg),
+      lsxChuaPO,
+      chuoiCongDoan,
+    };
+  }, [poDetail, poDetailBom, lsxList, gdListLoc]);
+
+  return (
+    <div>
+      <div style={styles.moduleHeader}>
+        <div>
+          <h2 style={styles.moduleTitle}>Dashboard tổng quan</h2>
+          <p style={styles.moduleSub}>Theo dõi tiến độ từng PO là chính</p>
+        </div>
+        <Field label="Xem chi tiết 1 PO">
+          <div style={{ minWidth: 240 }}>
+            <POSearchSelect poList={poList} value={poDetailId} onChange={setPoDetailId} placeholder="— Tổng quan tất cả PO —" />
+          </div>
+        </Field>
+      </div>
+
+      {poDetail && chiTietPO ? (
+        <PODetailDashboard po={poDetail} bom={poDetailBom} detail={chiTietPO} />
+      ) : (
+        <>
+          <div style={styles.dashLocNgayRow}>
+            <Field label="Từ ngày">
+              <input type="date" style={styles.input} value={tuNgay} onChange={(e) => setTuNgay(e.target.value)} />
+            </Field>
+            <Field label="Đến ngày">
+              <input type="date" style={styles.input} value={denNgay} onChange={(e) => setDenNgay(e.target.value)} />
+            </Field>
+            {(tuNgay || denNgay) && (
+              <button
+                style={styles.btnGhost}
+                onClick={() => {
+                  setTuNgay("");
+                  setDenNgay("");
+                }}
+              >
+                Bỏ lọc ngày
+              </button>
+            )}
+          </div>
+
+          <div style={styles.kpiRow5}>
+            <KpiCard label="PO đang chạy" value={stats.dangChay} accent="#C8602F" icon={<Clock size={16} />} />
+            <KpiCard label="PO hoàn tất" value={stats.hoanTat} accent="#2F6B47" icon={<CheckCircle2 size={16} />} />
+            <KpiCard label="Tổng mét mục tiêu" value={formatNumber(stats.tongMetMucTieu, 0)} accent="#0B3D2E" />
+            <KpiCard label="Phế" value={`${formatNumber(pheStats.tongPhe, 1)} kg`} accent="#B23A3A" />
+            <KpiCard
+              label="Tỷ lệ phế"
+              value={`${formatNumber(pheStats.tyLePhe, 1)}%`}
+              accent={pheStats.tyLePhe > 5 ? "#B23A3A" : "#C8602F"}
+              icon={pheStats.tyLePhe > 5 ? <AlertCircle size={16} /> : undefined}
+            />
+          </div>
+
+          {/* LỚP 2 — TIẾN ĐỘ PO, đặt lên đầu và nổi bật vì đây là trọng tâm chính */}
+          <div style={styles.lop2Box}>
+            <div style={styles.progressHeadRow}>
+              <div style={styles.sectionDividerLop2}>Tiến độ nhận hàng từng PO</div>
+            </div>
+            <div style={styles.filterRow}>
+              {[
+                { key: "all", label: "Tất cả" },
+                { key: "dang_chay", label: "Đang chạy" },
+                { key: "hoan_tat", label: "Hoàn tất" },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setPoFilter(f.key)}
+                  style={{ ...styles.filterTab, ...(poFilter === f.key ? styles.filterTabActive : {}) }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {tienDoPOFiltered.length === 0 ? (
+              <div style={styles.emptyStateSmall}>Chưa có PO nào</div>
+            ) : (
+              <div style={styles.progressListLop2}>
+                {tienDoPOFiltered.map(({ po, tongNhapTP, phanTram }) => (
+                  <div key={po.id} style={styles.progressItemLop2}>
+                    <div style={styles.progressHead}>
+                      <span style={styles.progressTitleLop2}>
+                        {po.maPO} <span style={styles.progressSub}>({po.khachHang})</span>
+                      </span>
+                      <span style={styles.progressPctLop2}>{formatNumber(phanTram, 0)}%</span>
+                    </div>
+                    <div style={styles.progressBarBgLop2}>
+                      <div style={{ ...styles.progressBarFillLop2, width: `${phanTram}%` }} />
+                    </div>
+                    <div style={styles.progressFoot}>
+                      {formatNumber(tongNhapTP, 1)} / {formatNumber(po.mucTieuMet, 1)} m
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* LỚP 1 — LSX tổng, thu nhỏ đặt dưới vì chỉ mang tính tham khảo phụ */}
+          <div style={styles.sectionDivider}>Tiến độ Lệnh SX tổng</div>
+          {tienDoLSX.length === 0 ? (
+            <div style={styles.emptyStateSmall}>Chưa có Lệnh sản xuất nào</div>
+          ) : (
+            <div style={styles.lop1CompactGrid}>
+              {tienDoLSX.map(({ lsx, tongMetCaLenh, tongNhap, phanTram }) => {
+                const tenCacPO = (lsx.poItems || [])
+                  .map((item) => poList.find((p) => p.id === item.poId)?.maPO)
+                  .filter(Boolean);
+                return (
+                  <div key={lsx.id} style={styles.lop1CompactItem}>
+                    <div style={styles.progressHead}>
+                      {/* Bỏ ghi chú tên công đoạn vì mã LSX đã có sẵn tên công đoạn trong mã */}
+                      <span style={styles.progressTitleCompact}>{lsx.ma}</span>
+                      <span style={styles.progressPctCompact}>{formatNumber(phanTram, 0)}%</span>
+                    </div>
+                    {tenCacPO.length > 0 && (
+                      <div style={styles.progressPoRow}>
+                        {tenCacPO.map((ten) => (
+                          <span key={ten} style={styles.progressPoChip}>
+                            {ten}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={styles.progressBarBg}>
+                      <div style={{ ...styles.progressBarFill, width: `${phanTram}%` }} />
+                    </div>
+                    <div style={styles.progressFoot}>
+                      {formatNumber(tongNhap, 1)} / {formatNumber(tongMetCaLenh, 1)} m
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={styles.sectionDivider}>Phân tích phế liệu theo lý do</div>
+          {pheTheoLyDo.length === 0 ? (
+            <div style={styles.emptyStateSmall}>Chưa có dữ liệu phế</div>
+          ) : (
+            <div style={styles.pheGrid}>
+              {pheTheoLyDo.map((item) => (
+                <div key={item.lyDo} style={styles.pheItem}>
+                  <span style={styles.pheLyDo}>{item.lyDo}</span>
+                  <span style={styles.pheKg}>{formatNumber(item.kg, 1)} kg</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ====================================================================
+// CHI TIẾT DASHBOARD THEO 1 PO (chế độ xem sâu)
+// ====================================================================
+// Xuất báo cáo PO ra file Excel - dùng đúng dữ liệu đang hiển thị trên Dashboard
+// chi tiết PO (KPI, tiến độ công đoạn, NVL tiêu hao KH/TT/CL, phế theo lý do)
+function xuatBaoCaoPOExcel(po, bom, detail) {
+  const wb = XLSX.utils.book_new();
+
+  const tyLeHoanThanh =
+    po.mucTieuMet > 0
+      ? Math.min(100, (detail.tienDoCongDoan.find((r) => r.congDoan.id === "cat_dong_goi")?.metTT || 0) / po.mucTieuMet * 100)
+      : 0;
+  const haoHutTong = detail.tongTT - detail.tongKH;
+
+  // Sheet 1: Tổng quan
+  const sheetTongQuan = [
+    ["BÁO CÁO TỔNG KẾT PO"],
+    [],
+    ["Mã PO", po.maPO],
+    ["Khách hàng", po.khachHang],
+    ["Mã Thành phẩm", bom?.maTP || ""],
+    ["Quy cách", bom?.quyCach || ""],
+    ["Ngày tạo", formatNgayGio(po.ngayTao)],
+    ["Trạng thái", po.trangThai === "dang_chay" ? "Đang chạy" : "Hoàn tất"],
+    [],
+    ["CHỈ SỐ TỔNG HỢP"],
+    ["Mục tiêu mét TP", po.mucTieuMet],
+    ["Tỷ lệ hoàn thành TP (%)", Number(tyLeHoanThanh.toFixed(1))],
+    ["Tổng NVL kế hoạch (kg)", Number(detail.tongKH.toFixed(2))],
+    ["Tổng NVL thực tế (kg)", Number(detail.tongTT.toFixed(2))],
+    ["Hao hụt NVL TT-KH (kg)", Number(haoHutTong.toFixed(2))],
+    ["Tổng phế (kg)", Number(detail.tongPhe.toFixed(2))],
+    ["Tỷ lệ phế (%)", Number(detail.tyLePhe.toFixed(1))],
+  ];
+  const wsTongQuan = XLSX.utils.aoa_to_sheet(sheetTongQuan);
+  wsTongQuan["!cols"] = [{ wch: 28 }, { wch: 22 }];
+  XLSX.utils.book_append_sheet(wb, wsTongQuan, "Tổng quan");
+
+  // Sheet 2: Tiến độ theo công đoạn
+  const sheetTienDo = [
+    ["Công đoạn", "Mét kế hoạch", "Mét thực tế", "Tỷ lệ hoàn thành (%)"],
+    ...detail.tienDoCongDoan.map((r) => [
+      r.congDoan.ten,
+      Number(r.metKH.toFixed(1)),
+      Number(r.metTT.toFixed(1)),
+      Number(r.phanTram.toFixed(1)),
+    ]),
+  ];
+  const wsTienDo = XLSX.utils.aoa_to_sheet(sheetTienDo);
+  wsTienDo["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, wsTienDo, "Tiến độ công đoạn");
+
+  // Sheet 3: NVL tiêu hao KH/TT/CL
+  const sheetNvl = [
+    ["Tên NVL", "Kế hoạch (kg)", "Thực tế (kg)", "Chênh lệch (kg)"],
+    ...detail.haoHutNVL.map((n) => [
+      n.ten,
+      Number(n.kh.toFixed(2)),
+      Number(n.tt.toFixed(2)),
+      Number(n.chenhLech.toFixed(2)),
+    ]),
+  ];
+  const wsNvl = XLSX.utils.aoa_to_sheet(sheetNvl);
+  wsNvl["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+  XLSX.utils.book_append_sheet(wb, wsNvl, "Tiêu hao NVL");
+
+  // Sheet 4: Tỷ lệ hoàn thành theo màu Lõi
+  if (detail.hoanThanhTheoMau.length > 0) {
+    const sheetMau = [
+      ["Màu", "Mét kế hoạch", "Mét thực tế", "Tỷ lệ hoàn thành (%)"],
+      ...detail.hoanThanhTheoMau.map((m) => [
+        m.tenMau,
+        Number(m.metKH.toFixed(1)),
+        Number(m.metTT.toFixed(1)),
+        Number(m.phanTram.toFixed(1)),
+      ]),
+    ];
+    const wsMau = XLSX.utils.aoa_to_sheet(sheetMau);
+    wsMau["!cols"] = [{ wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsMau, "Hoàn thành theo màu");
+  }
+
+  // Sheet 5: Phế theo lý do
+  const sheetPhe = [
+    ["Lý do phế", "Số kg"],
+    ...detail.pheTheoLyDoPO.map((p) => [p.lyDo, Number(p.kg.toFixed(2))]),
+  ];
+  const wsPhe = XLSX.utils.aoa_to_sheet(sheetPhe);
+  wsPhe["!cols"] = [{ wch: 24 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsPhe, "Phế theo lý do");
+
+  const tenFile = `BaoCao_${po.maPO.replace(/[^a-zA-Z0-9]/g, "_")}_${todayISO()}.xlsx`;
+  XLSX.writeFile(wb, tenFile);
+}
+
+function PODetailDashboard({ po, bom, detail }) {
+  const tyLeHoanThanh = po.mucTieuMet > 0 ? Math.min(100, (detail.tienDoCongDoan.find((r) => r.congDoan.id === "cat_dong_goi")?.metTT || 0) / po.mucTieuMet * 100) : 0;
+  const haoHutTong = detail.tongTT - detail.tongKH;
+
+  return (
+    <div>
+      <div style={styles.poDetailBannerRow}>
+        <div style={styles.poDetailBanner}>
+          <FileText size={15} />
+          <span>
+            {po.maPO} — {po.khachHang} {bom ? `· ${bom.maTP} (${bom.quyCach || "—"})` : ""}
+          </span>
+        </div>
+        <button style={styles.btnPrimary} onClick={() => xuatBaoCaoPOExcel(po, bom, detail)}>
+          <FileText size={15} />
+          <span>Xuất Excel</span>
+        </button>
+      </div>
+
+      <div style={styles.kpiRow4}>
+        <KpiCard label="Mục tiêu mét TP" value={formatNumber(po.mucTieuMet, 0)} accent="#0B3D2E" />
+        <KpiCard label="Tỷ lệ hoàn thành TP" value={`${formatNumber(tyLeHoanThanh, 0)}%`} accent="#2F6B47" icon={<CheckCircle2 size={16} />} />
+        <KpiCard
+          label="Hao hụt NVL (TT - KH)"
+          value={`${haoHutTong >= 0 ? "+" : ""}${formatNumber(haoHutTong, 1)} kg`}
+          accent={haoHutTong > 0 ? "#B23A3A" : "#2F6B47"}
+        />
+        <KpiCard
+          label="Tỷ lệ phế"
+          value={`${formatNumber(detail.tyLePhe, 1)}%`}
+          accent={detail.tyLePhe > 5 ? "#B23A3A" : "#C8602F"}
+          icon={detail.tyLePhe > 5 ? <AlertCircle size={16} /> : undefined}
+        />
+      </div>
+
+      <div style={styles.dashboardCols}>
+        <div style={styles.dashboardCol}>
+          <div style={styles.sectionDivider}>Tiến độ sản xuất theo công đoạn</div>
+          {detail.tienDoCongDoan.length === 0 ? (
+            <div style={styles.emptyStateSmall}>PO này chưa có dữ liệu Cascade (kiểm tra BOM/mục tiêu mét)</div>
+          ) : (
+            <div style={styles.progressList}>
+              {detail.tienDoCongDoan.map((row) => (
+                <div key={row.congDoan.id} style={styles.progressItem}>
+                  <div style={styles.progressHead}>
+                    <span style={styles.progressTitle}>{row.congDoan.ten}</span>
+                    <span style={styles.progressPct}>{formatNumber(row.phanTram, 0)}%</span>
+                  </div>
+                  <div style={styles.progressBarBg}>
+                    <div style={{ ...styles.progressBarFill, width: `${row.phanTram}%` }} />
+                  </div>
+                  <div style={styles.progressFoot}>
+                    {formatNumber(row.metTT, 1)} / {formatNumber(row.metKH, 1)} m
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={styles.dashboardCol}>
+          <div style={styles.sectionDivider}>Nguyên vật liệu tiêu hao (KH / TT)</div>
+          {detail.haoHutNVL.length === 0 ? (
+            <div style={styles.emptyStateSmall}>Chưa có định mức NVL</div>
+          ) : (
+            <div style={styles.nvlCompareList}>
+              {detail.haoHutNVL.map((item) => (
+                <div key={item.ten} style={styles.nvlCompareRow}>
+                  <span style={styles.nvlCompareName}>{item.ten}</span>
+                  <div style={styles.nvlCompareNums}>
+                    <span style={styles.nvlCompareKH}>KH: {formatNumber(item.kh, 1)}</span>
+                    <span style={styles.nvlCompareTT}>TT: {formatNumber(item.tt, 1)}</span>
+                    <span
+                      style={{
+                        ...styles.nvlCompareCL,
+                        color: item.chenhLech > 0 ? "#B23A3A" : "#2F6B47",
+                      }}
+                    >
+                      CL: {item.chenhLech >= 0 ? "+" : ""}
+                      {formatNumber(item.chenhLech, 1)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {detail.hoanThanhTheoMau.length > 0 && (
+        <>
+          <div style={styles.sectionDivider}>Tỷ lệ hoàn thành theo màu Lõi</div>
+          <div style={styles.mauBarGrid}>
+            {detail.hoanThanhTheoMau.map((item) => (
+              <div key={item.tenMau} style={styles.mauBarItem}>
+                <div style={styles.mauBarTrack}>
+                  <div
+                    style={{
+                      ...styles.mauBarFill,
+                      height: `${Math.min(100, item.phanTram)}%`,
+                      background: item.phanTram >= 100 ? "#2F6B47" : item.phanTram >= 80 ? "#C8602F" : "#B23A3A",
+                    }}
+                  />
+                </div>
+                <span style={styles.mauBarPct}>{formatNumber(item.phanTram, 0)}%</span>
+                <span style={styles.mauBarLabel}>{item.tenMau}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {detail.pheTheoLyDoPO.length > 0 && (
+        <>
+          <div style={styles.sectionDivider}>Phế liệu của PO này theo lý do</div>
+          <div style={styles.pheGrid}>
+            {detail.pheTheoLyDoPO.map((item) => (
+              <div key={item.lyDo} style={styles.pheItem}>
+                <span style={styles.pheLyDo}>{item.lyDo}</span>
+                <span style={styles.pheKg}>{formatNumber(item.kg, 1)} kg</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {detail.chuoiCongDoan.length > 0 && (
+        <>
+          <div style={styles.sectionDivider}>Chuỗi Lệnh SX theo công đoạn của PO này</div>
+          <div style={styles.chuoiCongDoanList}>
+            {detail.chuoiCongDoan.map((item, idx) => (
+              <React.Fragment key={item.congDoan.id}>
+                <div style={styles.chuoiCongDoanItem}>
+                  <div style={styles.chuoiCongDoanHead}>
+                    <span style={styles.chuoiCongDoanTen}>{item.congDoan.ten}</span>
+                    {item.lsx ? (
+                      <span style={styles.chuoiCongDoanPct}>{formatNumber(item.phanTram, 0)}%</span>
+                    ) : (
+                      <span style={styles.chuoiCongDoanChuaCo}>Chưa có LSX</span>
+                    )}
+                  </div>
+                  {item.lsx ? (
+                    <>
+                      <div style={styles.progressBarBg}>
+                        <div style={{ ...styles.progressBarFill, width: `${item.phanTram}%` }} />
+                      </div>
+                      <div style={styles.chuoiCongDoanMa}>
+                        {item.lsx.ma} · {formatNumber(item.tongNhapLSX, 1)}/{formatNumber(item.tongMetLSX, 1)} m (cả lệnh)
+                      </div>
+                    </>
+                  ) : (
+                    <div style={styles.chuoiCongDoanHint}>PO này chưa được gộp vào Lệnh SX nào ở công đoạn này</div>
+                  )}
+                </div>
+                {idx < detail.chuoiCongDoan.length - 1 && (
+                  <ArrowRight size={16} color="#A9AFA6" style={{ flexShrink: 0 }} />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </>
+      )}
+
+      {detail.lsxChuaPO.length > 0 && (
+        <div style={styles.lsxLienQuanBox}>
+          <AlertCircle size={14} />
+          <span>
+            Số liệu NVL/mét ở các công đoạn dùng LSX gộp (xem chuỗi trên) là số của cả lệnh, mang tính tham khảo
+            theo tỷ trọng, không tách tuyệt đối chính xác theo riêng PO này.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ====================================================================
+// MODULE PO
+// ====================================================================
+function ModulePO({ poList, persistPO, bomList }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingPO, setEditingPO] = useState(null);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [searchText, setSearchText] = useState("");
+
+  const handleSavePO = async (po) => {
+    let newList;
+    if (editingPO) {
+      newList = poList.map((p) => (p.id === po.id ? po : p));
+    } else {
+      newList = [...poList, po];
+    }
+    await persistPO(newList);
+    setShowForm(false);
+    setEditingPO(null);
+  };
+
+  const handleDelete = async (id) => {
+    await persistPO(poList.filter((p) => p.id !== id));
+    setConfirmDelete(null);
+  };
+
+  const handleToggleStatus = async (id) => {
+    const newList = poList.map((p) =>
+      p.id === id ? { ...p, trangThai: p.trangThai === "dang_chay" ? "hoan_tat" : "dang_chay" } : p
+    );
+    await persistPO(newList);
+  };
+
+  const filteredList = useMemo(() => {
+    let list = filterStatus === "all" ? poList : poList.filter((p) => p.trangThai === filterStatus);
+    if (searchText.trim()) {
+      const s = searchText.trim().toLowerCase();
+      list = list.filter(
+        (p) => p.maPO.toLowerCase().includes(s) || (p.khachHang || "").toLowerCase().includes(s)
+      );
+    }
+    return list;
+  }, [poList, filterStatus, searchText]);
+
+  const stats = useMemo(() => {
+    const dangChay = poList.filter((p) => p.trangThai === "dang_chay").length;
+    const hoanTat = poList.filter((p) => p.trangThai === "hoan_tat").length;
+    return { total: poList.length, dangChay, hoanTat };
+  }, [poList]);
+
+  return (
+    <div>
+      <div style={styles.moduleHeader}>
+        <div>
+          <h2 style={styles.moduleTitle}>Quản lý PO</h2>
+          <p style={styles.moduleSub}>Theo dõi đơn hàng sản xuất cáp</p>
+        </div>
+        <button
+          style={styles.btnPrimary}
+          onClick={() => {
+            setEditingPO(null);
+            setShowForm(true);
+          }}
+        >
+          <Plus size={18} />
+          <span>Tạo PO mới</span>
+        </button>
+      </div>
+
+      <div style={styles.kpiRow}>
+        <KpiCard label="Tổng số PO" value={stats.total} accent="#0B3D2E" />
+        <KpiCard label="Đang chạy" value={stats.dangChay} accent="#C8602F" icon={<Clock size={16} />} />
+        <KpiCard label="Hoàn tất" value={stats.hoanTat} accent="#2F6B47" icon={<CheckCircle2 size={16} />} />
+      </div>
+
+      <div style={styles.searchRow}>
+        <input
+          style={styles.searchInput}
+          placeholder="Tìm theo mã PO hoặc tên khách hàng..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <span style={styles.countBadge}>
+          {filteredList.length} / {poList.length} PO
+        </span>
+      </div>
+
+      <div style={styles.filterRow}>
+        {[
+          { key: "all", label: "Tất cả" },
+          { key: "dang_chay", label: "Đang chạy" },
+          { key: "hoan_tat", label: "Hoàn tất" },
+        ].map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilterStatus(f.key)}
+            style={{ ...styles.filterTab, ...(filterStatus === f.key ? styles.filterTabActive : {}) }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {filteredList.length === 0 ? (
+        <div style={styles.emptyState}>
+          <Package size={40} color="#A9AFA6" />
+          <p style={styles.emptyTitle}>{poList.length === 0 ? "Chưa có PO nào" : "Không tìm thấy PO phù hợp"}</p>
+          <p style={styles.emptySub}>
+            {poList.length === 0 ? "Tạo PO đầu tiên để bắt đầu theo dõi sản xuất" : "Thử từ khóa hoặc bộ lọc khác"}
+          </p>
+        </div>
+      ) : (
+        <div style={styles.poGrid}>
+          {filteredList
+            .slice()
+            .reverse()
+            .map((po) => (
+              <POCard
+                key={po.id}
+                po={po}
+                bomList={bomList}
+                onEdit={() => {
+                  setEditingPO(po);
+                  setShowForm(true);
+                }}
+                onDelete={() => setConfirmDelete(po.id)}
+                onToggleStatus={() => handleToggleStatus(po.id)}
+              />
+            ))}
+        </div>
+      )}
+
+      {showForm && (
+        <POFormModal
+          initial={editingPO}
+          bomList={bomList}
+          onClose={() => {
+            setShowForm(false);
+            setEditingPO(null);
+          }}
+          onSave={handleSavePO}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          message="Xóa PO này? Toàn bộ dữ liệu mục tiêu sẽ mất, hành động không thể hoàn tác."
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => handleDelete(confirmDelete)}
+        />
+      )}
+    </div>
+  );
+}
+
+function KpiCard({ label, value, accent, icon }) {
+  return (
+    <div style={styles.kpiCard}>
+      <div style={styles.kpiTop}>
+        <span style={styles.kpiLabel}>{label}</span>
+        {icon && <span style={{ color: accent }}>{icon}</span>}
+      </div>
+      <div style={{ ...styles.kpiValue, color: accent }}>{value}</div>
+    </div>
+  );
+}
+
+function POCard({ po, bomList, onEdit, onDelete, onToggleStatus }) {
+  const isDangChay = po.trangThai === "dang_chay";
+  const bom = bomList.find((b) => b.id === po.bomId);
+
+  // Tính lại Cascade để hiện đủ từng loại NVL thô, không gộp chung 1 số tổng
+  const cascade = useMemo(() => {
+    if (!bom || !po.mucTieuMet) return null;
+    return tinhCascadeBOM(bom, po.mucTieuMet);
+  }, [bom, po.mucTieuMet]);
+
+  return (
+    <div style={styles.poCard}>
+      <div style={styles.poCardHeader}>
+        <div>
+          <div style={styles.poCode}>{po.maPO}</div>
+          <div style={styles.poCustomer}>{po.khachHang}</div>
+          {po.ngayTao && <div style={styles.poNgayTao}>Tạo lúc: {formatNgayGio(po.ngayTao)}</div>}
+        </div>
+        <button
+          onClick={onToggleStatus}
+          style={{
+            ...styles.statusBadge,
+            background: isDangChay ? "#FBEEE4" : "#E7F0EA",
+            color: isDangChay ? "#C8602F" : "#2F6B47",
+          }}
+        >
+          {isDangChay ? <Clock size={13} /> : <CheckCircle2 size={13} />}
+          {isDangChay ? "Đang chạy" : "Hoàn tất"}
+        </button>
+      </div>
+
+      {bom && (
+        <div style={styles.poBomTag}>
+          <FileText size={12} />
+          <span>
+            {bom.maTP} {bom.quyCach ? `(${bom.quyCach})` : ""}
+          </span>
+        </div>
+      )}
+
+      <div style={styles.poTargetGrid}>
+        <div style={styles.poTargetItem}>
+          <span style={styles.poTargetLabel}>Mục tiêu mét</span>
+          <span style={styles.poTargetValue}>{formatNumber(po.mucTieuMet)} m</span>
+        </div>
+      </div>
+
+      {cascade && (() => {
+        // Chỉ hiện NVL có tên chứa "đồng" hoặc "nhựa" (không phân biệt hoa/thường,
+        // không phân biệt dấu) - các loại khác (giấy bạc, chỉ...) ẩn hẳn trên card PO
+        const chuanHoa = (s) =>
+          s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const dongNhuaList = cascade.tongTheoNvl.filter((item) => {
+          const t = chuanHoa(item.ten);
+          return t.includes("dong") || t.includes("nhua");
+        });
+        if (dongNhuaList.length === 0) return null;
+        return (
+          <div style={styles.poNvlBoxNoiBat}>
+            <div style={styles.poNvlBoxNoiBatTitle}>
+              <Package size={15} />
+              <span>NVL THÔ CẦN CẤP TỪ NGOÀI</span>
+            </div>
+            <div style={styles.poNvlGridNoiBat}>
+              {dongNhuaList.map((item) => (
+                <div key={item.ten} style={styles.poNvlItemNoiBat}>
+                  <span style={styles.poNvlNameNoiBat}>{item.ten}</span>
+                  <span style={styles.poNvlValueNoiBat}>{formatNumber(item.kg, 1)} kg</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={styles.poCardFooter}>
+        <button onClick={onEdit} style={styles.iconBtn}>
+          <Edit3 size={15} />
+          <span>Sửa</span>
+        </button>
+        <button onClick={onDelete} style={{ ...styles.iconBtn, color: "#B23A3A" }}>
+          <Trash2 size={15} />
+          <span>Xóa</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function POFormModal({ initial, bomList, onClose, onSave }) {
+  const [maPO, setMaPO] = useState(initial?.maPO || "");
+  const [khachHang, setKhachHang] = useState(initial?.khachHang || "");
+  const [ngayDuKien, setNgayDuKien] = useState(initial?.ngayDuKien || "");
+  const [bomId, setBomId] = useState(initial?.bomId || "");
+  const [mucTieuMet, setMucTieuMet] = useState(initial?.mucTieuMet ?? "");
+  const [error, setError] = useState("");
+
+  const bomChon = bomList.find((b) => b.id === bomId);
+  const cascade = useMemo(() => {
+    if (!bomChon || !mucTieuMet) return null;
+    return tinhCascadeBOM(bomChon, mucTieuMet);
+  }, [bomChon, mucTieuMet]);
+  const mucTieuKgUocTinh = cascade ? cascade.tongKg : 0;
+
+  const handleSubmit = () => {
+    if (!maPO.trim()) {
+      setError("Vui lòng nhập mã PO");
+      return;
+    }
+    if (!khachHang.trim()) {
+      setError("Vui lòng nhập tên khách hàng");
+      return;
+    }
+    if (!bomId) {
+      setError("Vui lòng chọn mã Thành phẩm (BOM) cho PO này");
+      return;
+    }
+
+    const po = {
+      id: initial?.id || uid(),
+      maPO: maPO.trim(),
+      khachHang: khachHang.trim(),
+      // ngayTao: tự ghi nhận chính xác lúc bấm tạo, không cho sửa tay. Giữ nguyên
+      // giá trị cũ nếu đang sửa PO đã có, chỉ gán mới khi tạo PO lần đầu.
+      ngayTao: initial?.ngayTao || nowISO(),
+      ngayDuKien,
+      bomId,
+      mucTieuMet: mucTieuMet === "" ? 0 : Number(mucTieuMet),
+      mucTieuKgUocTinh,
+      trangThai: initial?.trangThai || "dang_chay",
+    };
+    onSave(po);
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={styles.modalTitle}>{initial ? "Sửa PO" : "Tạo PO mới"}</h2>
+          <button onClick={onClose} style={styles.modalCloseBtn}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={styles.modalBody}>
+          {error && (
+            <div style={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div style={styles.formRow2}>
+            <Field label="Mã PO *">
+              <input
+                style={styles.input}
+                value={maPO}
+                onChange={(e) => setMaPO(e.target.value)}
+                placeholder="VD: PO-JOHNSON-0621"
+              />
+            </Field>
+            <Field label="Khách hàng *">
+              <input
+                style={styles.input}
+                value={khachHang}
+                onChange={(e) => setKhachHang(e.target.value)}
+                placeholder="VD: Johnson Controls"
+              />
+            </Field>
+          </div>
+
+          <Field label="Ngày dự kiến hoàn tất">
+            <input
+              type="date"
+              style={styles.input}
+              value={ngayDuKien}
+              onChange={(e) => setNgayDuKien(e.target.value)}
+            />
+          </Field>
+
+          <div style={styles.sectionDivider}>Mã Thành phẩm (BOM) *</div>
+          {bomList.length === 0 ? (
+            <div style={styles.warnBox}>
+              <AlertCircle size={15} />
+              <span>Chưa có BOM nào. Vào tab "BOM" để tạo trước, sau đó quay lại chọn ở đây.</span>
+            </div>
+          ) : (
+            <select style={styles.input} value={bomId} onChange={(e) => setBomId(e.target.value)}>
+              <option value="">-- Chọn mã TP --</option>
+              {bomList.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.maTP} {b.quyCach ? `(${b.quyCach})` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div style={styles.sectionDivider}>Mục tiêu sản lượng</div>
+          <Field label="Mục tiêu (mét Thành phẩm)">
+            <input
+              type="number"
+              style={styles.input}
+              value={mucTieuMet}
+              onChange={(e) => setMucTieuMet(e.target.value)}
+              placeholder="0"
+            />
+          </Field>
+
+          {cascade && (
+            <>
+              <div style={styles.sectionDivider}>
+                Cascade tự động — mét từng công đoạn (theo Hệ số mét trong BOM)
+              </div>
+              <div style={styles.cascadeList}>
+                {cascade.chiTiet.map((row, idx) => (
+                  <div key={idx} style={styles.cascadeRow}>
+                    <div style={styles.cascadeRowHead}>
+                      <span style={styles.cascadeCongDoan}>{row.congDoanTen}</span>
+                      <span style={styles.cascadeBienThe}>{row.tenBienThe}</span>
+                      {row.heSoMet !== 1 && (
+                        <span style={styles.heSoMetChip}>K = {formatNumber(row.heSoMet, 4)}</span>
+                      )}
+                      <span style={styles.cascadeMet}>{formatNumber(row.metCongDoan, 1)} m</span>
+                    </div>
+                    {row.nvlList.length > 0 && (
+                      <div style={styles.cascadeNvlRow}>
+                        {row.nvlList.map((n, i) => (
+                          <span key={i} style={styles.nvlChipDisplay}>
+                            {n.ten}: {formatNumber(n.kg, 1)} kg
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div style={styles.tongHopBox}>
+                <div style={styles.tongHopTitle}>Tổng NVL dự kiến cần xuất (kg)</div>
+                <div style={styles.tongHopGrid}>
+                  {cascade.tongTheoNvl.map((item) => (
+                    <div key={item.ten} style={styles.tongHopItem}>
+                      <span style={styles.tongHopName}>{item.ten}</span>
+                      <span style={styles.tongHopValue}>{formatNumber(item.kg, 1)} kg</span>
+                    </div>
+                  ))}
+                  <div style={{ ...styles.tongHopItem, background: "#0B3D2E" }}>
+                    <span style={{ ...styles.tongHopName, color: "#CFE3D2" }}>Tổng cộng</span>
+                    <span style={{ ...styles.tongHopValue, color: "#fff" }}>
+                      {formatNumber(mucTieuKgUocTinh, 1)} kg
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={styles.modalFooter}>
+          <button style={styles.btnGhost} onClick={onClose}>
+            Hủy
+          </button>
+          <button style={styles.btnPrimary} onClick={handleSubmit}>
+            {initial ? "Lưu thay đổi" : "Tạo PO"}
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// MODULE BOM
+// ====================================================================
+function layGoiYNvlTheoCongDoan(bomList, congDoanId) {
+  const set = new Set();
+  bomList.forEach((bom) => {
+    const bienTheList = bom.dinhMuc?.[congDoanId];
+    if (bienTheList) {
+      bienTheList.forEach((bt) => {
+        (bt.nvlList || []).forEach((n) => {
+          if (n.ten) set.add(n.ten);
+        });
+      });
+    }
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "vi"));
+}
+function layGoiYBienTheTheoCongDoan(bomList, congDoanId) {
+  const set = new Set();
+  bomList.forEach((bom) => {
+    const bienTheList = bom.dinhMuc?.[congDoanId];
+    if (bienTheList) {
+      bienTheList.forEach((bt) => {
+        if (bt.tenBienThe) set.add(bt.tenBienThe);
+      });
+    }
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "vi"));
+}
+
+function ModuleBOM({ bomList, persistBOM }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingBOM, setEditingBOM] = useState(null);
+  const [duplicateFrom, setDuplicateFrom] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const handleSaveBOM = async (bom) => {
+    let newList;
+    const exists = bomList.find((b) => b.id === bom.id);
+    if (exists) {
+      newList = bomList.map((b) => (b.id === bom.id ? bom : b));
+    } else {
+      newList = [...bomList, bom];
+    }
+    await persistBOM(newList);
+    setShowForm(false);
+    setEditingBOM(null);
+    setDuplicateFrom(null);
+  };
+
+  const handleDelete = async (id) => {
+    await persistBOM(bomList.filter((b) => b.id !== id));
+    setConfirmDelete(null);
+  };
+
+  const filteredList = useMemo(() => {
+    if (!search.trim()) return bomList;
+    const s = search.toLowerCase();
+    return bomList.filter(
+      (b) =>
+        b.maTP.toLowerCase().includes(s) ||
+        (b.tenMoTa || "").toLowerCase().includes(s) ||
+        (b.quyCach || "").toLowerCase().includes(s)
+    );
+  }, [bomList, search]);
+
+  return (
+    <div>
+      <div style={styles.moduleHeader}>
+        <div>
+          <h2 style={styles.moduleTitle}>Danh mục BOM</h2>
+          <p style={styles.moduleSub}>Định mức NVL theo mã Thành phẩm</p>
+        </div>
+        <button
+          style={styles.btnPrimary}
+          onClick={() => {
+            setEditingBOM(null);
+            setDuplicateFrom(null);
+            setShowForm(true);
+          }}
+        >
+          <Plus size={18} />
+          <span>Tạo BOM mới</span>
+        </button>
+      </div>
+
+      <div style={styles.searchRow}>
+        <input
+          style={styles.searchInput}
+          placeholder="Tìm mã TP, tên hoặc quy cách..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <span style={styles.countBadge}>{bomList.length} mã TP</span>
+      </div>
+
+      {filteredList.length === 0 ? (
+        <div style={styles.emptyState}>
+          <FileText size={40} color="#A9AFA6" />
+          <p style={styles.emptyTitle}>{bomList.length === 0 ? "Chưa có BOM nào" : "Không tìm thấy mã TP phù hợp"}</p>
+          <p style={styles.emptySub}>
+            {bomList.length === 0 ? "Tạo BOM cho mã Thành phẩm để dùng lại khi tạo PO mới" : "Thử từ khóa khác"}
+          </p>
+        </div>
+      ) : (
+        <div style={styles.bomList}>
+          {filteredList.map((bom) => (
+            <BOMCard
+              key={bom.id}
+              bom={bom}
+              expanded={expandedId === bom.id}
+              onToggleExpand={() => setExpandedId(expandedId === bom.id ? null : bom.id)}
+              onEdit={() => {
+                setEditingBOM(bom);
+                setDuplicateFrom(null);
+                setShowForm(true);
+              }}
+              onDuplicate={() => {
+                setEditingBOM(null);
+                setDuplicateFrom(bom);
+                setShowForm(true);
+              }}
+              onDelete={() => setConfirmDelete(bom.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <BOMFormModal
+          initial={editingBOM}
+          duplicateFrom={duplicateFrom}
+          existingCodes={bomList.map((b) => b.maTP)}
+          bomListForSuggestions={bomList}
+          onClose={() => {
+            setShowForm(false);
+            setEditingBOM(null);
+            setDuplicateFrom(null);
+          }}
+          onSave={handleSaveBOM}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          message="Xóa BOM này? Các PO đã tạo trước đó vẫn giữ dữ liệu cũ, nhưng PO mới sẽ không còn chọn được mã này."
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => handleDelete(confirmDelete)}
+        />
+      )}
+    </div>
+  );
+}
+
+function BOMCard({ bom, expanded, onToggleExpand, onEdit, onDuplicate, onDelete }) {
+  const soCongDoan = (bom.congDoanApDung || []).length;
+  const tongHop = useMemo(() => tongHopNvlToanBOM(bom), [bom]);
+
+  return (
+    <div style={styles.bomCard}>
+      <button style={styles.bomCardHeader} onClick={onToggleExpand}>
+        <div style={styles.bomCardLeft}>
+          <div style={styles.bomCodeRow}>
+            <span style={styles.bomCode}>{bom.maTP}</span>
+            {bom.quyCach && <span style={styles.quyCachTag}>{bom.quyCach}</span>}
+          </div>
+          <div style={styles.bomDesc}>{bom.tenMoTa || "Chưa có mô tả"}</div>
+        </div>
+        <div style={styles.bomCardRight}>
+          <span style={styles.bomCdCount}>{soCongDoan} công đoạn</span>
+          {expanded ? <ChevronUp size={18} color="#6B7068" /> : <ChevronDown size={18} color="#6B7068" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div style={styles.bomCardBody}>
+          {(bom.od || bom.doDayNhuaVo) && (
+            <div style={styles.techRow}>
+              {bom.od && (
+                <span style={styles.techItem}>
+                  OD: <b>{bom.od}</b>
+                </span>
+              )}
+              {bom.doDayNhuaVo && (
+                <span style={styles.techItem}>
+                  Độ dày nhựa vỏ: <b>{bom.doDayNhuaVo}</b>
+                </span>
+              )}
+            </div>
+          )}
+
+          {tongHop.length > 0 && (
+            <div style={styles.tongHopBox}>
+              <div style={styles.tongHopTitle}>Tổng hợp NVL cho cả BOM (kg/m)</div>
+              <div style={styles.tongHopGrid}>
+                {tongHop.map((item) => (
+                  <div key={item.ten} style={styles.tongHopItem}>
+                    <span style={styles.tongHopName}>{item.ten}</span>
+                    <span style={styles.tongHopValue}>{formatNumber(item.tong, 6)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {CONG_DOAN_LIST.map((cd) => {
+            const bienTheList = bom.dinhMuc?.[cd.id];
+            if (!bienTheList || bienTheList.length === 0) return null;
+            return (
+              <div key={cd.id} style={styles.dinhMucCongDoan}>
+                <div style={styles.dinhMucCongDoanTitle}>{cd.ten}</div>
+                <div style={styles.mauTable}>
+                  {bienTheList.map((bt, idx) => (
+                    <div key={idx} style={styles.mauRow}>
+                      <span style={styles.mauRowLabel}>{bt.tenBienThe || "(chưa đặt tên)"}</span>
+                      {cd.coHeSoMet && bt.heSoMet !== undefined && bt.heSoMet !== 1 && (
+                        <span style={styles.heSoMetChip}>Hệ số m: {formatNumber(bt.heSoMet, 4)}</span>
+                      )}
+                      <div style={styles.mauRowNvl}>
+                        {bt.nvlList.map((n, i) => (
+                          <span key={i} style={styles.nvlChipDisplay}>
+                            {n.nhomNVL && <span style={styles.nhomNvlTag}>{n.nhomNVL}</span>} {n.ten}: {formatNumber(n.dinhMuc, 6)}
+                          </span>
+                        ))}
+                        <span style={styles.tongChip}>Tổng: {formatNumber(sumNVL(bt.nvlList), 6)} kg/m</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {soCongDoan === 0 && <span style={styles.dinhMucEmpty}>Chưa thiết lập định mức nào</span>}
+
+          <div style={styles.bomCardFooter}>
+            <button onClick={onEdit} style={styles.iconBtn}>
+              <Edit3 size={15} />
+              <span>Sửa</span>
+            </button>
+            <button onClick={onDuplicate} style={styles.iconBtn}>
+              <Copy size={15} />
+              <span>Tạo bản sao</span>
+            </button>
+            <button onClick={onDelete} style={{ ...styles.iconBtn, color: "#B23A3A" }}>
+              <Trash2 size={15} />
+              <span>Xóa</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BOMFormModal({ initial, duplicateFrom, existingCodes, bomListForSuggestions, onClose, onSave }) {
+  const baseData = initial || duplicateFrom;
+  const [maTP, setMaTP] = useState(initial ? initial.maTP : "");
+  const [tenMoTa, setTenMoTa] = useState(baseData?.tenMoTa || "");
+  const [quyCach, setQuyCach] = useState(baseData?.quyCach || "");
+  const [od, setOd] = useState(baseData?.od || "");
+  const [doDayNhuaVo, setDoDayNhuaVo] = useState(baseData?.doDayNhuaVo || "");
+  const [congDoanApDung, setCongDoanApDung] = useState(baseData?.congDoanApDung || []);
+
+  const [dinhMuc, setDinhMuc] = useState(() => {
+    if (!baseData?.dinhMuc) return {};
+    const copy = {};
+    Object.entries(baseData.dinhMuc).forEach(([cdId, list]) => {
+      copy[cdId] = list.map((bt) => ({
+        id: uid(),
+        tenBienThe: bt.tenBienThe,
+        heSoMet: bt.heSoMet !== undefined && bt.heSoMet !== null ? String(bt.heSoMet) : "1",
+        nvlList: bt.nvlList.map((n) => ({ ten: n.ten, nhomNVL: n.nhomNVL || "Khác", dinhMuc: n.dinhMuc })),
+      }));
+    });
+    return copy;
+  });
+
+  const [error, setError] = useState("");
+  const tongHopPreview = useMemo(() => tongHopNvlToanBOM({ dinhMuc }), [dinhMuc]);
+
+  const toggleCongDoan = (id) => {
+    const has = congDoanApDung.includes(id);
+    if (has) {
+      setCongDoanApDung((prev) => prev.filter((x) => x !== id));
+    } else {
+      setCongDoanApDung((prev) => [...prev, id]);
+      setDinhMuc((prev) => ({ ...prev, [id]: prev[id] || [] }));
+    }
+  };
+
+  const addBienThe = (cdId) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: [...(prev[cdId] || []), { id: uid(), tenBienThe: "", heSoMet: "1", nvlList: [{ ten: "", nhomNVL: "", dinhMuc: "" }] }],
+    }));
+  };
+  const renameBienThe = (cdId, btId, newName) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: prev[cdId].map((bt) => (bt.id === btId ? { ...bt, tenBienThe: newName } : bt)),
+    }));
+  };
+  const updateHeSoMet = (cdId, btId, value) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: prev[cdId].map((bt) => (bt.id === btId ? { ...bt, heSoMet: value } : bt)),
+    }));
+  };
+  const removeBienThe = (cdId, btId) => {
+    setDinhMuc((prev) => ({ ...prev, [cdId]: prev[cdId].filter((bt) => bt.id !== btId) }));
+  };
+  const addNvl = (cdId, btId) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: prev[cdId].map((bt) =>
+        bt.id === btId ? { ...bt, nvlList: [...bt.nvlList, { ten: "", nhomNVL: "", dinhMuc: "" }] } : bt
+      ),
+    }));
+  };
+  const updateNvl = (cdId, btId, idx, field, value) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: prev[cdId].map((bt) =>
+        bt.id === btId
+          ? { ...bt, nvlList: bt.nvlList.map((n, i) => (i === idx ? { ...n, [field]: value } : n)) }
+          : bt
+      ),
+    }));
+  };
+  const removeNvl = (cdId, btId, idx) => {
+    setDinhMuc((prev) => ({
+      ...prev,
+      [cdId]: prev[cdId].map((bt) => (bt.id === btId ? { ...bt, nvlList: bt.nvlList.filter((_, i) => i !== idx) } : bt)),
+    }));
+  };
+
+  const handleSubmit = () => {
+    if (!maTP.trim()) {
+      setError("Vui lòng nhập mã Thành phẩm");
+      return;
+    }
+    const codeChanged = !initial || initial.maTP !== maTP.trim();
+    if (codeChanged && existingCodes.includes(maTP.trim())) {
+      setError("Mã TP này đã tồn tại, vui lòng dùng mã khác hoặc sửa BOM đã có");
+      return;
+    }
+    if (congDoanApDung.length === 0) {
+      setError("Chọn ít nhất 1 công đoạn áp dụng");
+      return;
+    }
+
+    for (const cdId of congDoanApDung) {
+      const list = dinhMuc[cdId] || [];
+      for (const bt of list) {
+        if (bt.tenBienThe.trim() === "" && bt.nvlList.some((n) => n.ten.trim() !== "")) {
+          setError(`Có dòng chưa đặt tên ở công đoạn "${tenCongDoan(cdId)}"`);
+          return;
+        }
+      }
+    }
+
+    const cleanDinhMuc = {};
+    Object.entries(dinhMuc).forEach(([cdId, list]) => {
+      if (!congDoanApDung.includes(cdId)) return;
+      const cleaned = list
+        .filter((bt) => bt.tenBienThe.trim() !== "")
+        .map((bt) => ({
+          tenBienThe: bt.tenBienThe.trim(),
+          heSoMet: bt.heSoMet === "" || bt.heSoMet === undefined || isNaN(Number(bt.heSoMet)) ? 1 : Number(bt.heSoMet),
+          nvlList: bt.nvlList
+            .filter((n) => n.ten.trim() !== "")
+            .map((n) => ({
+              ten: n.ten.trim(),
+              nhomNVL: n.nhomNVL && n.nhomNVL.trim() !== "" ? n.nhomNVL : "Khác",
+              dinhMuc: n.dinhMuc === "" ? 0 : Number(n.dinhMuc),
+            })),
+        }))
+        .filter((bt) => bt.nvlList.length > 0);
+      if (cleaned.length > 0) cleanDinhMuc[cdId] = cleaned;
+    });
+
+    const bom = {
+      id: initial?.id || uid(),
+      maTP: maTP.trim(),
+      tenMoTa: tenMoTa.trim(),
+      quyCach: quyCach.trim(),
+      od: od.trim(),
+      doDayNhuaVo: doDayNhuaVo.trim(),
+      congDoanApDung,
+      dinhMuc: cleanDinhMuc,
+    };
+    onSave(bom);
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={styles.modalTitle}>{initial ? "Sửa BOM" : duplicateFrom ? "Tạo bản sao BOM" : "Tạo BOM mới"}</h2>
+          <button onClick={onClose} style={styles.modalCloseBtn}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={styles.modalBody}>
+          {error && (
+            <div style={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div style={styles.formRow2}>
+            <Field label="Mã Thành phẩm *">
+              <input style={styles.input} value={maTP} onChange={(e) => setMaTP(e.target.value)} placeholder="VD: PRI-7-0195BC" />
+            </Field>
+            <Field label="Quy cách">
+              <input style={styles.input} value={quyCach} onChange={(e) => setQuyCach(e.target.value)} placeholder="VD: 7/0.195BC" />
+            </Field>
+          </div>
+
+          <Field label="Tên / mô tả">
+            <input style={styles.input} value={tenMoTa} onChange={(e) => setTenMoTa(e.target.value)} placeholder="VD: Cáp Johnson 4 lõi" />
+          </Field>
+
+          <div style={{ ...styles.formRow2, marginTop: 12 }}>
+            <Field label="OD (tham khảo)">
+              <input style={styles.input} value={od} onChange={(e) => setOd(e.target.value)} placeholder="VD: 1.05" />
+            </Field>
+            <Field label="Độ dày nhựa vỏ (tham khảo)">
+              <input style={styles.input} value={doDayNhuaVo} onChange={(e) => setDoDayNhuaVo(e.target.value)} placeholder="VD: 0.45" />
+            </Field>
+          </div>
+
+          <div style={styles.sectionDivider}>Công đoạn áp dụng *</div>
+          <div style={styles.chipGrid}>
+            {CONG_DOAN_LIST.map((cd) => (
+              <button
+                key={cd.id}
+                type="button"
+                onClick={() => toggleCongDoan(cd.id)}
+                style={{ ...styles.chip, ...(congDoanApDung.includes(cd.id) ? styles.chipActive : {}) }}
+              >
+                {cd.ten}
+              </button>
+            ))}
+          </div>
+
+          {CONG_DOAN_LIST.filter((cd) => congDoanApDung.includes(cd.id)).map((cd) => {
+            const list = dinhMuc[cd.id] || [];
+            const goiYBienThe = [...cd.goiYBienThe, ...layGoiYBienTheTheoCongDoan(bomListForSuggestions || [], cd.id)];
+            const goiYBienTheUnique = Array.from(new Set(goiYBienThe));
+            const nvlGoiYChoCD = layGoiYNvlTheoCongDoan(bomListForSuggestions || [], cd.id);
+
+            return (
+              <div key={cd.id}>
+                <div style={styles.sectionDivider}>
+                  {cd.ten} — định mức theo {cd.nhanGoiBienThe}
+                </div>
+                {list.map((bt) => (
+                  <div key={bt.id} style={styles.dinhMucEditBox}>
+                    <div style={styles.mauNameRow}>
+                      <input
+                        style={{ ...styles.input, flex: 1, fontWeight: 700 }}
+                        placeholder={`Tên ${cd.nhanGoiBienThe} (gõ tự do)`}
+                        value={bt.tenBienThe}
+                        onChange={(e) => renameBienThe(cd.id, bt.id, e.target.value)}
+                        list={`bienthe-goi-y-${cd.id}`}
+                      />
+                      {cd.coHeSoMet && (
+                        <input
+                          type="number"
+                          style={{ ...styles.input, width: 100, flexShrink: 0 }}
+                          placeholder="Hệ số m"
+                          value={bt.heSoMet}
+                          onChange={(e) => updateHeSoMet(cd.id, bt.id, e.target.value)}
+                          step="0.0001"
+                          title="Hệ số mét: số mét cần SX ở công đoạn này cho mỗi 1 mét TP cuối"
+                        />
+                      )}
+                      <button type="button" onClick={() => removeBienThe(cd.id, bt.id)} style={styles.nvlRemoveBtn}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    {cd.coHeSoMet && (
+                      <div style={styles.heSoMetHint}>
+                        1m thành phẩm cần {formatNumber(bt.heSoMet || 1, 4)}m ở công đoạn {cd.ten}
+                      </div>
+                    )}
+                    {bt.nvlList.map((nvl, idx) => (
+                      <div key={idx} style={styles.nvlRow}>
+                        <input
+                          style={{ ...styles.input, flex: 2 }}
+                          placeholder="Tên NVL cụ thể (VD: Đồng 0.195, Nhựa PVC đen...)"
+                          value={nvl.ten}
+                          onChange={(e) => updateNvl(cd.id, bt.id, idx, "ten", e.target.value)}
+                          list={`nvl-goi-y-${cd.id}`}
+                        />
+                        <select
+                          style={{ ...styles.input, flex: 1 }}
+                          value={nvl.nhomNVL || ""}
+                          onChange={(e) => updateNvl(cd.id, bt.id, idx, "nhomNVL", e.target.value)}
+                        >
+                          <option value="">Nhóm...</option>
+                          {NHOM_NVL_LIST.map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          style={{ ...styles.input, flex: 1 }}
+                          placeholder="kg/m"
+                          value={nvl.dinhMuc}
+                          onChange={(e) => updateNvl(cd.id, bt.id, idx, "dinhMuc", e.target.value)}
+                          step="0.0000001"
+                        />
+                        <button type="button" onClick={() => removeNvl(cd.id, bt.id, idx)} style={styles.nvlRemoveBtn}>
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => addNvl(cd.id, bt.id)} style={styles.addNvlBtn}>
+                      <Plus size={14} />
+                      <span>Thêm NVL cho dòng này</span>
+                    </button>
+                  </div>
+                ))}
+
+                <datalist id={`bienthe-goi-y-${cd.id}`}>
+                  {goiYBienTheUnique.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+                <datalist id={`nvl-goi-y-${cd.id}`}>
+                  {nvlGoiYChoCD.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+
+                <button type="button" onClick={() => addBienThe(cd.id)} style={styles.addMauBtn}>
+                  <Plus size={15} />
+                  <span>
+                    Thêm {cd.nhanGoiBienThe} cho {cd.ten}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+
+          {tongHopPreview.length > 0 && (
+            <div style={styles.tongHopBoxSticky}>
+              <div style={styles.tongHopTitle}>Tổng hợp NVL toàn BOM (đang nhập, kg/m)</div>
+              <div style={styles.tongHopGrid}>
+                {tongHopPreview.map((item) => (
+                  <div key={item.ten} style={styles.tongHopItem}>
+                    <span style={styles.tongHopName}>{item.ten}</span>
+                    <span style={styles.tongHopValue}>{formatNumber(item.tong, 6)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={styles.modalFooter}>
+          <button style={styles.btnGhost} onClick={onClose}>
+            Hủy
+          </button>
+          <button style={styles.btnPrimary} onClick={handleSubmit}>
+            {initial ? "Lưu thay đổi" : "Tạo BOM"}
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// SHARED SMALL COMPONENTS
+// ====================================================================
+function Field({ label, children }) {
+  return (
+    <div style={styles.field}>
+      <label style={styles.fieldLabel}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// Combobox tìm kiếm-chọn PO dùng chung, thay cho dropdown <select> thông thường.
+// Gõ để lọc theo mã PO/khách hàng, bấm vào 1 dòng để chọn. Khi PO nhiều lên,
+// việc gõ lọc nhanh hơn nhiều so với kéo dropdown dài.
+function POSearchSelect({ poList, value, onChange, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const poChon = poList.find((p) => p.id === value);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return poList.slice(0, 8);
+    const s = query.trim().toLowerCase();
+    return poList
+      .filter((p) => p.maPO.toLowerCase().includes(s) || (p.khachHang || "").toLowerCase().includes(s))
+      .slice(0, 8);
+  }, [poList, query]);
+
+  return (
+    <div style={styles.poSearchSelectWrap}>
+      <input
+        style={styles.input}
+        value={open ? query : poChon ? `${poChon.maPO} — ${poChon.khachHang}` : ""}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          if (e.target.value === "") onChange("");
+        }}
+        onFocus={() => {
+          setOpen(true);
+          setQuery("");
+        }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Gõ để tìm mã PO hoặc khách hàng..."}
+      />
+      {open && (
+        <div style={styles.poSearchSelectDropdown}>
+          {filtered.length === 0 ? (
+            <div style={styles.poSearchSelectEmpty}>Không tìm thấy PO phù hợp</div>
+          ) : (
+            filtered.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                style={styles.poSearchSelectItem}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(p.id);
+                  setQuery("");
+                  setOpen(false);
+                }}
+              >
+                <span style={styles.poSearchSelectItemCode}>{p.maPO}</span>
+                <span style={styles.poSearchSelectItemSub}>{p.khachHang}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfirmModal({ message, onCancel, onConfirm }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onCancel}>
+      <div style={styles.confirmBox} onClick={(e) => e.stopPropagation()}>
+        <AlertCircle size={28} color="#B23A3A" />
+        <p style={styles.confirmText}>{message}</p>
+        <div style={styles.confirmActions}>
+          <button style={styles.btnGhost} onClick={onCancel}>
+            Hủy
+          </button>
+          <button style={styles.btnDanger} onClick={onConfirm}>
+            Xóa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// STYLES
+// ====================================================================
+const globalCSS = `
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  input:focus, select:focus { outline: none; border-color: #0B3D2E !important; box-shadow: 0 0 0 3px rgba(15,61,46,0.1); }
+  button { font-family: inherit; cursor: pointer; }
+  ::placeholder { color: #8B9189; }
+`;
+
+const styles = {
+  // ===== GIAO DỊCH =====
+  gdList: { display: "flex", flexDirection: "column", gap: 8 },
+  gdRow: {
+    background: "#fff",
+    border: "1px solid #E2E4E0",
+    borderRadius: 12,
+    padding: "12px 14px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  gdRowLeft: { display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 200 },
+  gdLoaiBadge: { fontSize: 11.5, fontWeight: 700, borderRadius: 6, padding: "4px 9px", whiteSpace: "nowrap" },
+  gdRowMain: { fontSize: 13.5, fontWeight: 600, color: "#1A1D1B" },
+  gdRowSub: { fontWeight: 400, color: "#6B7068" },
+  gdRowMeta: { fontSize: 11.5, color: "#6B7068", marginTop: 1 },
+  gdRowRight: { display: "flex", alignItems: "center", gap: 10 },
+  gdSoLuong: { fontSize: 14, fontWeight: 700, color: "#0B3D2E", whiteSpace: "nowrap" },
+  gdLsxInfo: { fontSize: 12.5, color: "#5C625A", background: "#F4F5F2", borderRadius: 8, padding: "8px 12px", marginTop: 8 },
+  gdFilterGomVaoRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 },
+  gdTongTheoTenBox: { background: "#F4F5F2", border: "1px solid #E2E4E0", borderRadius: 12, padding: 14, marginBottom: 16 },
+  gdTongTheoTenTitle: { fontSize: 13, fontWeight: 700, color: "#1A1D1B", marginBottom: 10 },
+  quyDoiHint: { fontSize: 11.5, color: "#2F6B47", background: "#E7F0EA", borderRadius: 8, padding: "8px 12px", marginTop: -4, marginBottom: 14 },
+
+  // ===== DASHBOARD =====
+  gdSummaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 10 },
+  gdSummaryCard: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 12, padding: "12px 14px", borderLeftWidth: 4 },
+  gdSummaryLabel: { fontSize: 11.5, fontWeight: 700, display: "block" },
+  gdSummaryValue: { fontSize: 16, fontWeight: 700, color: "#1A1D1B", display: "block", marginTop: 4 },
+  gdSummaryCount: { fontSize: 11, color: "#8B9189", display: "block", marginTop: 2 },
+
+  dashboardCols: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 6 },
+  dashboardCol: { minWidth: 0 },
+  progressHeadRow: {},
+
+  emptyStateSmall: { fontSize: 13, color: "#8B9189", fontStyle: "italic", padding: "20px 0", textAlign: "center" },
+
+  progressList: { display: "flex", flexDirection: "column", gap: 12 },
+  progressItem: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 10, padding: "10px 12px" },
+  progressHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 },
+  progressTitle: { fontSize: 13, fontWeight: 700, color: "#1A1D1B" },
+  progressSub: { fontSize: 11.5, fontWeight: 400, color: "#6B7068" },
+  progressPct: { fontSize: 13, fontWeight: 700, color: "#0B3D2E" },
+  progressBarBg: { background: "#EDEFEA", borderRadius: 20, height: 8, overflow: "hidden" },
+  progressBarFill: { background: "#0B3D2E", height: "100%", borderRadius: 20, transition: "width 0.3s" },
+  progressFoot: { fontSize: 11.5, color: "#6B7068", marginTop: 5 },
+  progressPoRow: { display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 6 },
+  progressPoChip: { fontSize: 10.5, fontWeight: 600, background: "#F4F5F2", color: "#5C625A", borderRadius: 5, padding: "2px 7px" },
+
+  pheGrid: { display: "flex", flexWrap: "wrap", gap: 8 },
+  pheItem: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    background: "#F8E9E9",
+    border: "1px solid #E8C7C7",
+    borderRadius: 10,
+    padding: "8px 14px",
+    minWidth: 120,
+  },
+  pheLyDo: { fontSize: 11.5, color: "#B23A3A", fontWeight: 600 },
+  pheKg: { fontSize: 16, fontWeight: 700, color: "#8F2E2E" },
+
+  // ===== CHI TIẾT DASHBOARD THEO PO =====
+  poDetailBannerRow: { display: "flex", gap: 10, alignItems: "stretch", marginBottom: 16, flexWrap: "wrap" },
+  poDetailBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#0B3D2E",
+    color: "#fff",
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontSize: 13.5,
+    fontWeight: 600,
+    flex: 1,
+  },
+  kpiRow4: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 },
+
+  nvlCompareList: { display: "flex", flexDirection: "column", gap: 8 },
+  nvlCompareRow: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 10, padding: "10px 12px" },
+  nvlCompareName: { fontSize: 13, fontWeight: 700, color: "#1A1D1B", display: "block", marginBottom: 6 },
+  nvlCompareNums: { display: "flex", gap: 12, flexWrap: "wrap" },
+  nvlCompareKH: { fontSize: 12, color: "#5C625A" },
+  nvlCompareTT: { fontSize: 12, color: "#0B3D2E", fontWeight: 600 },
+  nvlCompareCL: { fontSize: 12, fontWeight: 700 },
+
+  mauBarGrid: { display: "flex", gap: 14, alignItems: "flex-end", padding: "10px 4px 0", overflowX: "auto" },
+  mauBarItem: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 46 },
+  mauBarTrack: { width: 28, height: 90, background: "#EDEFEA", borderRadius: 6, display: "flex", alignItems: "flex-end", overflow: "hidden" },
+  mauBarFill: { width: "100%", borderRadius: "0 0 6px 6px" },
+  mauBarPct: { fontSize: 11.5, fontWeight: 700, color: "#1A1D1B" },
+  mauBarLabel: { fontSize: 11, color: "#6B7068", fontWeight: 600 },
+
+  lsxLienQuanBox: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+    background: "#FBEEE4",
+    color: "#A8632F",
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontSize: 12,
+    marginTop: 16,
+    lineHeight: 1.5,
+  },
+
+  chuoiCongDoanList: { display: "flex", alignItems: "stretch", gap: 8, overflowX: "auto", paddingBottom: 6 },
+  chuoiCongDoanItem: {
+    background: "#fff",
+    border: "1px solid #E2E4E0",
+    borderRadius: 10,
+    padding: "10px 12px",
+    minWidth: 150,
+    flexShrink: 0,
+  },
+  chuoiCongDoanHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, gap: 6 },
+  chuoiCongDoanTen: { fontSize: 12.5, fontWeight: 700, color: "#1A1D1B" },
+  chuoiCongDoanPct: { fontSize: 12.5, fontWeight: 700, color: "#0B3D2E" },
+  chuoiCongDoanChuaCo: { fontSize: 10.5, fontWeight: 600, color: "#C8602F", background: "#FBEEE4", borderRadius: 5, padding: "2px 6px", whiteSpace: "nowrap" },
+  chuoiCongDoanMa: { fontSize: 11, color: "#6B7068", marginTop: 5 },
+  chuoiCongDoanHint: { fontSize: 11, color: "#8B9189", fontStyle: "italic", marginTop: 2 },
+
+  app: { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", background: "#F7F8F6", minHeight: "100vh", color: "#1A1D1B" },
+  loadingWrap: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "Inter, sans-serif", background: "#F7F8F6" },
+  loadingText: { color: "#6B7068", fontSize: 14 },
+
+  tabBar: {
+    display: "flex",
+    gap: 4,
+    background: "#fff",
+    borderBottom: "1px solid #E2E4E0",
+    padding: "0 12px",
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+    overflowX: "auto",
+  },
+  tabBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    padding: "13px 12px",
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: "#6B7068",
+    whiteSpace: "nowrap",
+  },
+  tabBtnActive: { color: "#0B3D2E", borderBottomColor: "#0B3D2E" },
+
+  tabContent: { maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" },
+
+  placeholderBox: { background: "#fff", border: "1px dashed #E2E4E0", borderRadius: 14, padding: "70px 20px", textAlign: "center" },
+  placeholderTitle: { fontSize: 15, fontWeight: 600, margin: "14px 0 4px", color: "#1A1D1B" },
+  placeholderSub: { fontSize: 13, color: "#6B7068", margin: 0 },
+
+  moduleHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 },
+  moduleTitle: { fontSize: 19, fontWeight: 700, margin: 0, letterSpacing: -0.2 },
+  moduleSub: { fontSize: 13, color: "#6B7068", margin: "2px 0 0 0" },
+
+  btnPrimary: { display: "flex", alignItems: "center", gap: 6, background: "#0B3D2E", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" },
+  btnGhost: { background: "transparent", border: "1px solid #E2E4E0", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, color: "#5C625A" },
+  btnDanger: { background: "#B23A3A", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600 },
+
+  kpiRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 },
+  kpiRow5: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 },
+
+  dashLocNgayRow: { display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap" },
+
+  // LỚP 2 — trọng tâm chính, nổi bật bằng khung riêng + nền nhấn
+  lop2Box: {
+    background: "#fff",
+    border: "1.5px solid #0B3D2E",
+    borderRadius: 14,
+    padding: "16px 18px",
+    marginBottom: 24,
+  },
+  sectionDividerLop2: { fontSize: 15, fontWeight: 700, color: "#0B3D2E", marginBottom: 4 },
+  progressListLop2: { display: "flex", flexDirection: "column", gap: 14 },
+  progressItemLop2: { background: "#F4F5F2", border: "1px solid #E2E4E0", borderRadius: 12, padding: "14px 16px" },
+  progressTitleLop2: { fontSize: 15, fontWeight: 700, color: "#1A1D1B" },
+  progressPctLop2: { fontSize: 16, fontWeight: 800, color: "#0B3D2E" },
+  progressBarBgLop2: { background: "#EDEFEA", borderRadius: 20, height: 12, overflow: "hidden", marginTop: 8 },
+  progressBarFillLop2: { background: "#C8602F", height: "100%", borderRadius: 20, transition: "width 0.3s" },
+
+  // LỚP 1 — thu nhỏ, chỉ mang tính tham khảo phụ
+  lop1CompactGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 },
+  lop1CompactItem: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 10, padding: "8px 10px" },
+  progressTitleCompact: { fontSize: 12, fontWeight: 700, color: "#5C625A" },
+  progressPctCompact: { fontSize: 12, fontWeight: 700, color: "#6B7068" },
+  kpiCard: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 12, padding: "14px 16px" },
+  kpiTop: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  kpiLabel: { fontSize: 12.5, color: "#6B7068", fontWeight: 500 },
+  kpiValue: { fontSize: 26, fontWeight: 700, marginTop: 4, letterSpacing: -0.5 },
+
+  filterRow: { display: "flex", gap: 8, marginBottom: 16 },
+  filterTab: { background: "transparent", border: "1px solid #E2E4E0", borderRadius: 20, padding: "7px 14px", fontSize: 13.5, fontWeight: 500, color: "#5C625A" },
+  filterTabActive: { background: "#0B3D2E", borderColor: "#0B3D2E", color: "#fff" },
+
+  emptyState: { background: "#fff", border: "1px dashed #E2E4E0", borderRadius: 14, padding: "60px 20px", textAlign: "center" },
+  emptyTitle: { fontSize: 15, fontWeight: 600, margin: "14px 0 4px", color: "#1A1D1B" },
+  emptySub: { fontSize: 13, color: "#6B7068", margin: 0 },
+
+  poGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 14 },
+  poCard: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 12 },
+  poCardHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 },
+  poCode: { fontSize: 15.5, fontWeight: 700, letterSpacing: -0.2 },
+  poCustomer: { fontSize: 13, color: "#6B7068", marginTop: 2 },
+  poNgayTao: { fontSize: 11, color: "#8B9189", marginTop: 3 },
+  statusBadge: { display: "flex", alignItems: "center", gap: 5, border: "none", borderRadius: 20, padding: "5px 10px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" },
+  poBomTag: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5C625A", background: "#F4F5F2", borderRadius: 6, padding: "4px 8px", width: "fit-content" },
+
+  poTargetGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, background: "#F4F5F2", borderRadius: 10, padding: 10 },
+  poTargetItem: { display: "flex", flexDirection: "column", gap: 2 },
+  poTargetLabel: { fontSize: 11, color: "#6B7068" },
+  poTargetValue: { fontSize: 14, fontWeight: 700, color: "#1A1D1B" },
+
+  poNvlBox: { background: "#F4F5F2", borderRadius: 10, padding: 10 },
+  poNvlBoxTitle: { fontSize: 11, fontWeight: 700, color: "#6B7068", textTransform: "uppercase", letterSpacing: 0.3, display: "block", marginBottom: 8 },
+  poNvlGrid: { display: "flex", flexWrap: "wrap", gap: 6 },
+  poNvlItem: { display: "flex", flexDirection: "column", gap: 1, background: "#fff", border: "1px solid #E2E4E0", borderRadius: 8, padding: "5px 9px", minWidth: 90 },
+  poNvlName: { fontSize: 10.5, color: "#6B7068" },
+  poNvlValue: { fontSize: 13, fontWeight: 700, color: "#0B3D2E" },
+
+  // Khối NVL thô nổi bật - trọng tâm chính của card PO, để xưởng dễ dự trù mua hàng
+  poNvlBoxNoiBat: { background: "#0B3D2E", borderRadius: 12, padding: "12px 14px" },
+  poNvlBoxNoiBatTitle: { display: "flex", alignItems: "center", gap: 6, color: "#CFE3D2", fontSize: 11.5, fontWeight: 700, letterSpacing: 0.4, marginBottom: 10 },
+  poNvlGridNoiBat: { display: "flex", flexDirection: "column", gap: 6 },
+  poNvlItemNoiBat: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 12px" },
+  poNvlNameNoiBat: { fontSize: 13.5, fontWeight: 600, color: "#fff" },
+  poNvlValueNoiBat: { fontSize: 17, fontWeight: 800, color: "#7AC893", whiteSpace: "nowrap" },
+
+  poCardFooter: { display: "flex", gap: 8, borderTop: "1px solid #EDEFEA", paddingTop: 10, marginTop: 2 },
+  iconBtn: { display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", fontSize: 13, fontWeight: 600, color: "#5C625A", padding: "4px 8px", borderRadius: 6 },
+
+  searchRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 16 },
+  searchInput: { flex: 1, border: "1px solid #E2E4E0", borderRadius: 8, padding: "10px 13px", fontSize: 14, fontFamily: "inherit", background: "#fff" },
+  countBadge: { fontSize: 12.5, color: "#6B7068", whiteSpace: "nowrap" },
+
+  bomList: { display: "flex", flexDirection: "column", gap: 10 },
+  bomCard: { background: "#fff", border: "1px solid #E2E4E0", borderRadius: 14, overflow: "hidden" },
+  bomCardHeader: { width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: 16, background: "transparent", border: "none", textAlign: "left" },
+  bomCardLeft: { display: "flex", flexDirection: "column", gap: 3 },
+  bomCodeRow: { display: "flex", alignItems: "center", gap: 8 },
+  bomCode: { fontSize: 15, fontWeight: 700, letterSpacing: -0.2 },
+  quyCachTag: { fontSize: 11.5, background: "#F4F5F2", color: "#5C625A", borderRadius: 6, padding: "2px 7px", fontWeight: 600 },
+  bomDesc: { fontSize: 12.5, color: "#6B7068" },
+  bomCardRight: { display: "flex", alignItems: "center", gap: 10 },
+  bomCdCount: { fontSize: 12, background: "#EDEFEA", color: "#5C625A", borderRadius: 20, padding: "4px 10px", fontWeight: 600, whiteSpace: "nowrap" },
+
+  bomCardBody: { padding: "0 16px 16px", borderTop: "1px solid #EDEFEA" },
+  techRow: { display: "flex", gap: 16, marginTop: 14, fontSize: 12.5, color: "#5C625A" },
+  techItem: {},
+
+  dinhMucCongDoan: { background: "#F4F5F2", borderRadius: 10, padding: 12, marginTop: 12 },
+  dinhMucCongDoanTitle: { fontSize: 13, fontWeight: 700, marginBottom: 8, color: "#1A1D1B" },
+
+  tongHopBox: { background: "#E7F0EA", border: "1px solid #C3DBC9", borderRadius: 10, padding: 12, marginTop: 14 },
+  tongHopBoxSticky: { background: "#E7F0EA", border: "1px solid #C3DBC9", borderRadius: 10, padding: 12, marginTop: 18, marginBottom: 4 },
+  tongHopTitle: { fontSize: 12, fontWeight: 700, color: "#2F6B47", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
+  tongHopGrid: { display: "flex", flexWrap: "wrap", gap: 8 },
+  tongHopItem: { display: "flex", flexDirection: "column", gap: 1, background: "#fff", border: "1px solid #C3DBC9", borderRadius: 8, padding: "6px 10px", minWidth: 110 },
+  tongHopName: { fontSize: 11, color: "#2F6B47", fontWeight: 600 },
+  tongHopValue: { fontSize: 14.5, fontWeight: 700, color: "#0B3D2E" },
+
+  mauTable: { display: "flex", flexDirection: "column", gap: 6 },
+  mauRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  mauRowLabel: { fontSize: 12.5, fontWeight: 700, background: "#fff", border: "1px solid #E2E4E0", borderRadius: 6, padding: "3px 8px", minWidth: 60, textAlign: "center" },
+  heSoMetChip: { fontSize: 11, fontWeight: 600, background: "#FBEEE4", color: "#C8602F", borderRadius: 6, padding: "3px 8px" },
+  heSoMetHint: { fontSize: 11.5, color: "#6B7068", marginBottom: 10, fontStyle: "italic" },
+
+  cascadeList: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 },
+  cascadeRow: { background: "#F4F5F2", border: "1px solid #EDEFEA", borderRadius: 10, padding: "10px 12px" },
+  cascadeRowHead: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  cascadeCongDoan: { fontSize: 11.5, fontWeight: 700, color: "#0B3D2E", background: "#E7F0EA", borderRadius: 6, padding: "2px 8px" },
+  cascadeBienThe: { fontSize: 13, fontWeight: 700, color: "#1A1D1B" },
+  cascadeMet: { fontSize: 13, fontWeight: 700, color: "#0B3D2E", marginLeft: "auto" },
+  cascadeNvlRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  mauRowNvl: { display: "flex", flexWrap: "wrap", gap: 6 },
+  nvlChipDisplay: { fontSize: 11.5, background: "#fff", border: "1px solid #E2E4E0", borderRadius: 6, padding: "3px 8px", color: "#5C625A" },
+  nhomNvlTag: { fontSize: 10, fontWeight: 700, color: "#0B3D2E", background: "#E7F0EA", borderRadius: 4, padding: "1px 5px", marginRight: 3 },
+  tongChip: { fontSize: 11.5, background: "#E7F0EA", color: "#2F6B47", borderRadius: 6, padding: "3px 8px", fontWeight: 700 },
+
+  tonKhoBox: { background: "#FBF3E1", border: "1px solid #E8D9A8", borderRadius: 10, padding: 12, marginTop: 14 },
+  tonKhoTitle: { fontSize: 12, fontWeight: 700, color: "#9C7A28", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
+  tonKhoItem: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+    background: "#fff",
+    border: "1px solid #E8D9A8",
+    borderRadius: 8,
+    padding: "6px 10px",
+    minWidth: 120,
+  },
+  tonKhoItemHeet: { background: "#F8E9E9", borderColor: "#E8C7C7" },
+  tonKhoName: { fontSize: 11, color: "#9C7A28", fontWeight: 600 },
+  tonKhoValue: { fontSize: 14, fontWeight: 700, color: "#1A1D1B" },
+  tonKhoDaXuat: { fontSize: 10, color: "#C8602F", marginTop: 1 },
+
+  dauVaoBox: { background: "#E9EEF7", border: "1px solid #C9D4EA", borderRadius: 10, padding: 12, marginTop: 14 },
+  dauVaoTitle: { fontSize: 12, fontWeight: 700, color: "#3A5C8C", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
+  dauVaoItem: { display: "flex", flexDirection: "column", gap: 1, background: "#fff", border: "1px solid #C9D4EA", borderRadius: 8, padding: "6px 10px", minWidth: 120 },
+  dauVaoName: { fontSize: 11, color: "#3A5C8C", fontWeight: 600 },
+  dauVaoValue: { fontSize: 14, fontWeight: 700, color: "#1A1D1B" },
+
+  dinhMucEmpty: { fontSize: 12.5, color: "#8B9189", fontStyle: "italic", marginTop: 10, display: "block" },
+
+  bomCardFooter: { display: "flex", gap: 8, borderTop: "1px solid #EDEFEA", paddingTop: 12, marginTop: 14 },
+
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(20,20,16,0.45)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 },
+  modalBox: { background: "#fff", borderRadius: "16px 16px 0 0", width: "100%", maxWidth: 620, maxHeight: "92vh", display: "flex", flexDirection: "column" },
+  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px", borderBottom: "1px solid #EDEFEA" },
+  modalTitle: { fontSize: 17, fontWeight: 700, margin: 0 },
+  modalCloseBtn: { background: "#F4F5F2", border: "none", borderRadius: 8, padding: 6, display: "flex" },
+  modalBody: { padding: "16px 20px", overflowY: "auto", flex: 1 },
+  modalFooter: { display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 20px", borderTop: "1px solid #EDEFEA" },
+
+  formRow2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 },
+  field: { display: "flex", flexDirection: "column", gap: 6 },
+  fieldLabel: { fontSize: 12.5, fontWeight: 600, color: "#5C625A" },
+  input: { border: "1px solid #E2E4E0", borderRadius: 8, padding: "9px 11px", fontSize: 14, fontFamily: "inherit", width: "100%", color: "#1A1D1B", background: "#FFFFFF" },
+
+  poSearchSelectWrap: { position: "relative" },
+  poSearchSelectDropdown: {
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    right: 0,
+    background: "#fff",
+    border: "1px solid #E2E4E0",
+    borderRadius: 8,
+    boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
+    zIndex: 50,
+    maxHeight: 260,
+    overflowY: "auto",
+  },
+  poSearchSelectItem: {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    borderBottom: "1px solid #EDEFEA",
+    padding: "8px 12px",
+    gap: 1,
+  },
+  poSearchSelectItemCode: { fontSize: 13.5, fontWeight: 700, color: "#1A1D1B" },
+  poSearchSelectItemSub: { fontSize: 11.5, color: "#6B7068" },
+  poSearchSelectEmpty: { padding: "12px", fontSize: 12.5, color: "#8B9189", fontStyle: "italic", textAlign: "center" },
+
+  sectionDivider: { fontSize: 12, fontWeight: 700, color: "#6B7068", textTransform: "uppercase", letterSpacing: 0.4, margin: "18px 0 10px", paddingTop: 14, borderTop: "1px solid #EDEFEA" },
+
+  chipGrid: { display: "flex", flexWrap: "wrap", gap: 8 },
+  chip: { border: "1px solid #E2E4E0", background: "#fff", borderRadius: 20, padding: "7px 13px", fontSize: 13, fontWeight: 500, color: "#5C625A" },
+  chipActive: { background: "#0B3D2E", borderColor: "#0B3D2E", color: "#fff" },
+
+  dinhMucEditBox: { background: "#F4F5F2", borderRadius: 10, padding: 12, marginBottom: 10 },
+  mauNameRow: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center" },
+  nvlRow: { display: "flex", gap: 8, marginBottom: 8, alignItems: "center" },
+  nvlRemoveBtn: { background: "#F4F5F2", border: "none", borderRadius: 6, padding: 7, display: "flex", color: "#6B7068", flexShrink: 0 },
+  addNvlBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "1px dashed #CBCFC9", borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, color: "#5C625A", marginTop: 2 },
+  addMauBtn: { display: "flex", alignItems: "center", gap: 6, background: "#0B3D2E", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 4 },
+
+  warnBox: { display: "flex", alignItems: "center", gap: 8, background: "#FBEEE4", color: "#C8602F", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 12 },
+  errorBox: { display: "flex", alignItems: "center", gap: 8, background: "#F8E9E9", color: "#B23A3A", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 14 },
+
+  lsxList: { display: "flex", flexDirection: "column", gap: 10 },
+  poTagsRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 14, marginBottom: 4 },
+  poTagChip: { fontSize: 11.5, background: "#F4F5F2", color: "#5C625A", borderRadius: 6, padding: "3px 8px", fontWeight: 600 },
+
+  poSelectGrid: { display: "flex", flexWrap: "wrap", gap: 8 },
+  poSelectChip: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 2,
+    border: "1px solid #E2E4E0",
+    background: "#fff",
+    borderRadius: 10,
+    padding: "8px 12px",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#5C625A",
+    minWidth: 140,
+  },
+  poSelectChipActive: { background: "#0B3D2E", borderColor: "#0B3D2E", color: "#fff" },
+  poSelectSub: { fontSize: 11, fontWeight: 400, opacity: 0.8 },
+
+  matrixWrap: { overflowX: "auto", marginBottom: 4 },
+  matrixTable: { borderCollapse: "collapse", width: "100%", minWidth: 360 },
+  matrixTh: {
+    fontSize: 11.5,
+    fontWeight: 700,
+    color: "#5C625A",
+    textAlign: "left",
+    padding: "6px 8px",
+    borderBottom: "2px solid #E2E4E0",
+    whiteSpace: "nowrap",
+  },
+  matrixTdLabel: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    padding: "6px 8px",
+    borderBottom: "1px solid #EDEFEA",
+    whiteSpace: "nowrap",
+  },
+  matrixThSub: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    color: "#8B9189",
+    textAlign: "center",
+    padding: "2px 4px 6px",
+    borderBottom: "2px solid #E2E4E0",
+  },
+  matrixHint: { fontSize: 11, color: "#6B7068", fontStyle: "italic", marginTop: 6, marginBottom: 4 },
+  matrixTd: { padding: "4px 6px", borderBottom: "1px solid #EDEFEA" },
+  matrixInput: {
+    border: "1px solid #E2E4E0",
+    borderRadius: 6,
+    padding: "6px 8px",
+    fontSize: 13,
+    width: 80,
+    fontFamily: "inherit",
+    background: "#FFFFFF",
+  },
+
+  confirmBox: { background: "#fff", borderRadius: 16, padding: 24, maxWidth: 360, margin: "auto", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
+  confirmText: { fontSize: 14, color: "#1A1D1B", margin: 0, lineHeight: 1.5 },
+  confirmActions: { display: "flex", gap: 10, marginTop: 6 },
+};
+
+
+// ================================================================
+// MOUNT
+// ================================================================
+const container = document.getElementById("root");
+const reactRoot = ReactDOM.createRoot(container);
+reactRoot.render(React.createElement(MESApp));
+
+// Hide splash after mount
+setTimeout(() => {
+  const splash = document.getElementById("splash");
+  if (splash) {
+    splash.classList.add("hide");
+    setTimeout(() => splash.remove(), 450);
+  }
+}, 600);
+</script>
+
+<script>
+// ================================================================
+// SERVICE WORKER registration
+// ================================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('[SW] Registered:', reg.scope))
+      .catch(err => console.warn('[SW] Failed:', err));
+  });
+}
+
+// ================================================================
+// PWA Install prompt
+// ================================================================
+let deferredPrompt = null;
+const banner = document.getElementById('pwa-banner');
+const installBtn = document.getElementById('pwa-install-btn');
+const closeBtn = document.getElementById('pwa-banner-close');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (banner) banner.style.display = 'flex';
+});
+
+if (installBtn) {
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    if (banner) banner.style.display = 'none';
+  });
+}
+
+if (closeBtn) {
+  closeBtn.addEventListener('click', () => {
+    if (banner) banner.style.display = 'none';
+  });
+}
+
+window.addEventListener('appinstalled', () => {
+  if (banner) banner.style.display = 'none';
+  deferredPrompt = null;
+});
+</script>
+
+</body>
+</html>
