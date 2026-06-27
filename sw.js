@@ -1,100 +1,55 @@
-// ====================================================================
-// Service Worker — MES App PWA
-// Cache-first cho assets tĩnh, network-first cho CDN scripts
-// ====================================================================
+// ============================================================
+// Service Worker — MES App PWA  v3
+// Strategy: cache-first for all local assets
+// ============================================================
+const CACHE = 'mes-v3';
+const PRECACHE = ['./', './index.html', './manifest.json'];
 
-const CACHE_NAME = "mes-app-v1";
-
-// Các file cần cache khi install
-const PRECACHE_ASSETS = [
-  "./index.html",
-  "./manifest.json"
-];
-
-// ------------------------------------------------------------------ //
-// INSTALL: pre-cache shell
-// ------------------------------------------------------------------ //
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_ASSETS);
-    })
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(PRECACHE))
+      .then(() => self.skipWaiting())
   );
-  // Kích hoạt ngay, không chờ tab cũ đóng
-  self.skipWaiting();
 });
 
-// ------------------------------------------------------------------ //
-// ACTIVATE: xóa cache cũ
-// ------------------------------------------------------------------ //
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keyList) =>
-      Promise.all(
-        keyList
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
-    )
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// ------------------------------------------------------------------ //
-// FETCH: stale-while-revalidate cho CDN, cache-first cho local assets
-// ------------------------------------------------------------------ //
-self.addEventListener("fetch", (event) => {
-  const { request } = event;
-  const url = new URL(request.url);
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || !url.protocol.startsWith('http')) return;
 
-  // Bỏ qua các request không phải GET
-  if (request.method !== "GET") return;
-
-  // Bỏ qua chrome-extension và non-http
-  if (!url.protocol.startsWith("http")) return;
-
-  // CDN (unpkg, cdnjs, esm.sh…): stale-while-revalidate
-  if (
-    url.hostname.includes("unpkg.com") ||
-    url.hostname.includes("cdnjs.cloudflare.com") ||
-    url.hostname.includes("esm.sh") ||
-    url.hostname.includes("cdn.jsdelivr.net")
-  ) {
-    event.respondWith(staleWhileRevalidate(request));
+  // CDN resources: stale-while-revalidate
+  if (url.hostname !== self.location.hostname) {
+    e.respondWith(
+      caches.open(CACHE).then(async cache => {
+        const cached = await cache.match(e.request);
+        const networkP = fetch(e.request).then(r => {
+          if (r && r.status === 200) cache.put(e.request, r.clone());
+          return r;
+        }).catch(() => cached);
+        return cached || networkP;
+      })
+    );
     return;
   }
 
-  // Mọi thứ còn lại (local files): cache-first
-  event.respondWith(
-    caches.match(request).then((cached) => {
+  // Local files: cache-first
+  e.respondWith(
+    caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (!response || response.status !== 200 || response.type === "opaque") {
-          return response;
+      return fetch(e.request).then(r => {
+        if (r && r.status === 200) {
+          caches.open(CACHE).then(c => c.put(e.request, r.clone()));
         }
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
-        return response;
+        return r;
       });
     })
   );
 });
-
-// ------------------------------------------------------------------ //
-// Helper: stale-while-revalidate
-// ------------------------------------------------------------------ //
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
-
-  const networkFetch = fetch(request)
-    .then((response) => {
-      if (response && response.status === 200) {
-        cache.put(request, response.clone());
-      }
-      return response;
-    })
-    .catch(() => cached); // offline: trả về cached nếu network lỗi
-
-  return cached || networkFetch;
-}

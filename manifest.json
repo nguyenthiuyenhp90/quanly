@@ -1,25 +1,17 @@
 {
-  "name": "MES - Quản lý Sản xuất Dây cáp",
+  "name": "MES — Quản lý Sản xuất Dây cáp",
   "short_name": "MES App",
-  "description": "Hệ thống quản lý sản xuất: PO, BOM, Lệnh SX, Giao dịch, Dashboard",
-  "start_url": "./index.html",
+  "description": "Quản lý PO, BOM, Lệnh SX, Giao dịch, Dashboard cho xưởng dây cáp",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "orientation": "portrait-primary",
-  "background_color": "#F7F8F6",
+  "orientation": "any",
+  "background_color": "#0B3D2E",
   "theme_color": "#0B3D2E",
   "lang": "vi",
+  "categories": ["productivity", "business"],
   "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }
